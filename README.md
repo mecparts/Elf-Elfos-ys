@@ -26,5 +26,5 @@ very alpha.
 
 ### Inspiration
 
-[Elfos-yr](https://github.com/dmadle/Elfos-yr)
-[Elfos-Elf-xr](https://github.com/rileym65/Elf-Elfos-xr)
+* [Elfos-yr](https://github.com/dmadle/Elfos-yr)<br>
+* [Elfos-Elf-xr](https://github.com/rileym65/Elf-Elfos-xr)<br>
