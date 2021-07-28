@@ -1,0 +1,802 @@
+; -------------------------------------------------------------------
+; *** ys: send one or more files using YMODEM batch protocol
+; ***
+; *** Build #
+; ***  1: Proof of concept version
+; ***
+; *******************************************************************
+; *** This software is released to the public domain.		  ***
+; *** You have permission to use, modify, copy, and distribute	  ***
+; *** this software as you please.				  ***
+; *******************************************************************
+;
+	include	"bios.inc"
+	include	"kernel.inc"
+;	
+debug	equ	0
+;
+; ***************************************************
+; ***** Constants				*****
+; ***************************************************
+cr	equ	'M'-'@'
+lf	equ	'J'-'@'
+bs	equ	'H'-'@'
+;
+soh	equ	'A'-'@'		; 128 byte packet header
+stx	equ	'B'-'@'		; 1K byte packet header
+eot	equ	'D'-'@'		; end of file transfer marker
+ack	equ	'F'-'@'		; Acknowledge (good packet)
+nak	equ	'U'-'@'		; Negative acknowledge (bad packet)
+can	equ	'X'-'@'		; cancel transfer
+crc	equ	'C'		; use CRC rather than checksum
+;
+; ***************************************************
+; ***** This block is the Execution header for	*****
+; ***** a stand-alone program. It begins 6	*****
+; *****bytes before the program start.		*****
+; ***************************************************
+LoadAdr	equ	2000h
+	org	LoadAdr-6	; Header starts at 01ffah
+	dw	LoadAdr
+	dw	EndRom-LoadAdr
+	dw	LoadAdr
+;
+; ***************************************************
+; ***** Code start				*****
+; ***************************************************
+	br	Start
+;
+; ***************************************************
+; ***** Program header				*****
+; ***************************************************
+	date
+Build:	dw	1		; build number
+	db	'proof of concept build',0
+;
+FilDes:	db	0,0,0,0
+	dw	Dta
+	db	0,0
+	db	0
+	db	0,0,0,0
+	dw	0,0
+	db	0,0,0,0
+;
+; ***************************************************
+; ***** Main program				*****
+; ***************************************************
+start:	
+	push	r6		; save Elf/OS's return address on its stack
+	load	rf,saveStack	; save Elf/OS's stack
+	ghi	r2
+	str	rf
+	inc	rf
+	glo	r2
+	str	rf
+	load	r2,localStack	; use our own stack
+	ghi	re		; turn off console echo
+	ani	11111110b
+	phi	re
+;
+	call	NextFileName	; point to first file name
+	lbnz	NextFile	; and go send it
+	call	O_INMSG		; otherwise display usage message
+	db	'Usage:	ys filename [filename...]',cr,lf,0
+	lbr	Exit		; and return to os
+NextFile:
+	call	SendFile	; send next file
+	call	NextFileName	; point to next file name in cmd tail
+	lbnz	NextFile	; loop for next file
+	call	WaitNAK		; wait for receiver to be ready for next file
+	load	rf,blknum
+	ldi	0
+	str	rf
+	call	ZeroBlock0	; send zero filled block 0 to finish up
+	load	rf,block0
+	load	rc,128
+	ldi	10
+	plo	r8
+	call	SendBlock
+	lbr	Exit		; and return to os
+;
+; ***************************************************
+; ***** NextFilename: advance RA to the next	*****
+; ***** non space character			*****
+; ***************************************************
+NextFileName:
+	lda	ra		; move past any spaces
+	smi	' '
+	lbz	NextFileName
+	dec	ra		; move back to non-space character
+	ldn	ra		; get byte
+	retn
+;
+; ***************************************************
+; ***** Exit: return to Elf/OS, restoring OS	*****
+; *****       stack and R6 contents		*****
+; ***************************************************
+Exit:
+	ghi	re		; restore console echo
+	ori	00000001b
+	phi	re
+	load	rf,saveStack	; restore Elf/OS's stack
+	lda	rf
+	phi	r2
+	ldn	rf
+	plo	r2
+	pop	r6		; restore Elf/OS's return address
+	retn			; return to Elf/OS
+;
+; ***************************************************
+; ***** Send file: send a single file	  	*****
+; ***** RA: points to file name			*****
+; ***************************************************
+SendFile:
+	call	ZeroBlock0
+	load	rd,block0	; copy filename to block
+B0loop1:
+	lda	ra		; look for first less <= space
+	str	rd
+	inc	rd
+	smi	' '+1
+	lbdf	B0loop1
+	dec	ra
+	dec	rd
+	ldi	0		; zero terminate filename
+	str	rd
+	inc	rd
+	push	rd		; save block ptr
+	load	rd,fildes	; get file descriptor
+	load	rf,block0
+	ldi	O_APPND		; flags for open, append
+	plo	r7
+	call	O_OPEN		; attempt to open file to determine size
+	lbnf	B0opened	; jump if file was opened
+	call	O_INMSG
+	db	'Couldn',27,'t open file: ',0
+	load	rf,block0
+	call	O_MSG		; display it
+	call	crlf
+	lbr	Exit		; and return to os
+B0opened:
+	load	rd,fildes
+	load	rf,fileSize
+	lda	rd		; put 32 bit offset into
+	phi	r7		; R7:R8 and fileSize
+	str	rf
+	inc	rf
+;
+	lda	rd
+	plo	r7
+	str	rf
+	inc	rf
+;
+	lda	rd
+	phi	r8
+	str	rf
+	inc	rf
+;
+	ldn	rd
+	plo	r8
+	str	rf
+;
+	dec	rd		; restore descriptor
+	dec	rd
+	dec	rd
+;
+	push	r7
+	push	r8
+;
+	load	r8,0
+	load	r7,0
+	load	rd,fildes
+	load	rc,0		; rewind file to start
+	call	O_SEEK
+;
+	pop	r8
+	pop	r7
+	pop	rf		; restore block ptr
+	call	uint32_out	; convert number to ascii
+	ldi	' '		; finish file size with space	
+	str	rf
+	inc	rf
+	ldi	'0'		; default modify timestamp to 0
+	str	rf
+	inc	rf
+	ldi	' '		; finish timestamp with space	
+	str	rf
+	inc	rf
+	ldi	'0'		; default file mode to 0
+	str	rf
+	str	rf
+;
+	call	WaitNAK
+	smi	crc
+	bz	CrcMode
+	smi	nak-crc
+	bz	SaveMode
+SendFileError:
+	load	rd,fildes
+	call	O_CLOSE
+	smi	0		; DF=1, error
+	retn
+CrcMode:
+	ldi	1
+SaveMode:
+	plo	r7
+	load	rf,blkMode
+	glo	r7
+	str	rf
+;
+	load	rf,blkNum
+	ldi	0
+	str	rf
+	load	rf,block0
+	load	rc,128
+	ldi	10
+	plo	r8
+	call	SendBlock	; send file block 0
+	lbdf	SendFileError
+;
+	 if	debug
+	call	crlf
+	load	rf,hexcount
+	ldi	0
+	str	rf
+	 endif
+	call	WaitNAK
+	smi	nak
+	bz	fileSendLoop
+	smi	crc-nak
+	bnz	SendFileError
+;
+FileSendLoop:
+	load	rf,fileSize
+	load	rc,1024		; assume we've got at least 1K
+	lda	rf		; left to send
+	lbnz	MoreToGo
+	lda	rf
+	lbnz	MoreToGo
+	ldn	rf
+	smi	high 1024
+	lbdf	MoreToGo	; jump if >= 1K left to go
+NearingTheEnd:
+	load	rc,128		; switch to 128 byte sectors
+	lda	rf
+	lbz	MoreToGo
+	ldn	rf
+	lbz	FileDone
+MoreToGo:
+	push	rc
+	load	rd,fildes
+	load	rf,blockBuffer
+	call	O_READ
+	glo	rc
+	lbnz	ReadBytes
+	ghi	rc
+	lbz	FileDone
+ReadBytes:
+	load	rf,fileSize+3	; LSB
+;
+	glo	rc		; decrement fileSize by
+	str	r2		; # bytes read
+	ldn	rf
+	sm
+	str	rf
+;
+	dec	rf
+	ghi	rc
+	str	r2
+	ldn	rf
+	smb
+	str	rf
+;
+	dec	rf
+	ldn	rf
+	sdbi	0
+	str	rf
+;
+	dec	rf
+	ldn	rf
+	sdbi	0
+	str	rf
+;	
+	pop	rc		; retrieve block size
+	load	rf,blockBuffer
+	ldi	10
+	plo	r8
+	call	SendBlock
+	lbdf	SendFileError
+	smi	ack
+	bz	BlockACKed
+	call	Cancel
+	lbr	SendFileError
+BlockACKed:
+	lbr	fileSendLoop
+FileDone:
+	call	SendEOT		; signal file done and get response
+	smi	ack		; ACK'd?
+	lbnz	SendFileError
+	load	rd,fildes
+	call	O_CLOSE
+	adi	0		; DF=0, no error
+	retn			; all done!
+;
+; ***************************************************
+; ***** ZeroBlock0: zeroes block 0		*****
+; ***************************************************
+ZeroBlock0:
+	load	rf,block0
+ZeroLoop:
+	ldi	0
+	str	rf
+	inc	rf
+	glo	rf
+	smi	low (block0+128)
+	lbnz	ZeroLoop
+	retn
+;
+; ***************************************************
+; ***** Cancel: send 8 CANs followed by 8 BSs	*****
+; ***************************************************
+Cancel:
+	push	r7
+	ldi	8
+	plo	r7
+cancelLoop:
+	ldi	can
+	call	TTYout		; send CAN (^X) 8 times
+	dec	r7
+	glo	r7
+	bnz	cancelLoop
+	ldi	8
+	plo	r7
+bsLoop:
+	ldi	bs		; send BS (^H) 8 times
+	call	TTYout
+	dec	r7
+	glo	r7
+	bnz	bsLoop
+	pop	r7
+	retn
+;
+; ***************************************************
+; ***** WaitNAK: wait for CRC or NAK char	*****
+; ***************************************************
+WaitNAK:
+	 if	debug
+	ldi	crc
+	 else	
+	call	f_read
+	plo	re
+	smi	crc
+	bz	GotNAKorCRC
+	smi	nak-crc
+	bnz	WaitNAK
+GotNAKorCRC:
+	glo	re
+	 endi
+	retn
+;
+; ***************************************************
+; ***** GetACK: wait for ACK/NAK or CAN	char	*****
+; ***************************************************
+GetACK:
+	 if	debug
+	ldi	ack
+	 else
+	call	f_read		; read response to block sent
+	 endi
+	plo	re
+	smi	ack
+	lbz	GotACK		; ACK'd, all good
+	smi	nak-ack
+	lbz	DidntGetACK	; NAK'd, probably have to resend
+	smi	can-nak
+	lbz	DidntGetACK	; CAN'd, terminating transfer
+	lbr	GetACK
+GotACK:
+	glo	re
+	adi	0		; DF = 0, ACKed
+	retn
+DidntGetACK:
+	glo	re
+	smi	0		; DF = 1, not ACKed
+	retn
+;
+; ***************************************************
+; ***** SendEOT: send EOT, wait for ACK		*****
+; ***************************************************
+SendEOT:
+	ldi	eot
+	call	TTYout		; send EOT (^D)
+	 if	debug
+	call	crlf
+	push	rf
+	load	rf,hexcount
+	ldi	0
+	str	rf
+	pop	rf
+	 else
+	call	f_read
+	smi	ack		; wait for ACK (^F)
+	bnz	SendEOT
+	 endi
+	ldi	ack
+	retn
+;
+; *******************************************
+; ***** Send file block	  		*****
+; ***** RF - pointer to block		*****
+; ***** RC - Block length		*****
+; ***** R8 - # retries			*****
+; *******************************************
+ResendBlock:
+	pop	rc
+	pop	rf
+SendBlock:
+	push	rf
+	push	rc
+	ghi	rc		; 1K or 128b block?
+	lbz	Send128
+	ldi	stx		; 1K
+	lbr	SendStart
+Send128:
+	ldi	soh		; 128b
+SendStart:
+	call	TTYout		; SOH/STK
+	load	rd,blkNum
+	ldn	rd
+	call	TTYout		; block #
+	ldn	rd
+	sdi	255
+	call	TTYout		; NOT block #
+;
+	ldi	high crcTableLow
+	phi	r9
+	ldi	high crcTableHigh
+	phi	rb
+;
+	load	r7,0
+	load	rd,blkMode
+	ldn	rd		; 0=checksum, 1=CRC
+	lbz	SendWithChecksum
+;
+SendWithCRC:
+	ldn	rf
+	call	TTYout		; send data byte
+	lda	rf		; retrieve again and advance ptr
+;
+	str	r2
+	ghi	r7		; j = (crc >> 8) ^ byte
+	xor
+	plo	r9
+	plo	rb
+;
+	glo	r7		; crc = (crc << 8) ^ table[j]
+	sex	rb
+	xor
+	sex	r2
+	phi	r7
+	ldn	r9
+	plo	r7
+;
+	dec	rc		; loop while data bytes
+	ghi	rc		; left to send
+	bnz	SendWithCRC
+	glo	rc
+	bnz	SendWithCRC
+;
+	ghi	r7		; send hi byte of CRC
+	call	TTYout
+	glo	r7		; send lo byte of CRC
+	call	TTYout
+SendBlockACK:
+	call	GetACK
+	plo	r7
+	smi	ack
+	lbz	SendBlockDone	; block ACK'd
+	smi	nak-ack
+	lbnz	SendBlockError
+	dec	r8		; block NAK'd
+	glo	r8		; resend if any retries left
+	lbnz	ResendBlock
+SendBlockError:
+	pop	rc
+	pop	rf
+	glo	r7
+	smi	0		; DF = 1, error
+	retn
+SendBlockDone:
+	 if	debug
+	call	O_INMSG
+	db	cr,lf,'acked',cr,lf,0
+	 endi
+	load	rd,blknum
+	ldn	rd
+	adi	1		; next block #
+	str	rd
+	pop	rc
+	pop	rf
+	glo	r7
+	adi	0		; DF = 0, done
+	retn
+;
+SendWithChecksum:
+	lda	rf
+	str	r2
+	glo	r7
+	add
+	plo	r7
+	ldn	r2
+	call	TTYout		; send data byte
+	dec	rc
+	ghi	rc
+	lbnz	SendWithChecksum
+	glo	rc
+	lbnz	SendWithChecksum
+	glo	r7
+	call	TTYout		; send checksum
+	lbr	SendBlockACK	; wait for block to be ACK'd/NAK'd
+;
+; ***************************************************
+; ***** Start a new line on the terminal	*****
+; ***************************************************
+crlf:
+	call	O_INMSG
+	db	cr,lf,0
+	retn
+;
+; ***************************************************
+; ***** Convert 32-bit unsigned int to ASCII	*****
+; ***** using the double-dabble algorithm	*****
+; ***** (AKA shift and add 3)			*****
+; ***** R7:R8 - 32-bit integer			*****
+; ***** RF - destination buffer	pointer		*****
+; ***************************************************
+UINT32_DIGITS	EQU	10	; maximum of 10 digits in result
+UINT32_BITS	EQU	32	; how many bits did you THINK there'd be???
+
+uint32_out:
+	push	rd		; save consumed registers
+	push	r9
+	push	r8
+	push	r7
+	load	rd,uint32_buf	; RD is output buffer
+itoa1:	
+	push	rd		; save buffer pointer
+	ldi	UINT32_DIGITS	; clear out BCD buffer
+	plo	re
+tobcdlp1:
+	ldi	0
+	str	rd		; store into answer
+	inc	rd
+	dec	re		; decrement count
+	glo	re
+	lbnz	tobcdlp1	; loop until done
+	pop	rd		; recover buffer pointer
+	ldi	UINT32_BITS	; 32 bits to process
+	plo	r9
+tobcdlp2:
+	ldi	UINT32_DIGITS	; process all 10 digits
+	plo	re		; for digits >= 5
+	push	rd		; save buffer pointer
+tobcdlp3:
+	ldn	rd		; get byte
+	smi	5		; need to see if 5 or greater
+	lbnf	tobcdlp3a	; jump if not
+	adi	5+3		; add 3 to original number
+	str	rd		; and put it back
+tobcdlp3a:
+	inc	rd		; point to next cell
+	dec	re		; decrement cell count
+	glo	re		; retrieve count
+	lbnz	tobcdlp3	; loop back if not done
+	
+	glo	r8		; shift 32 bit binary number
+	shl			; 1 bit left
+	plo	r8
+	ghi	r8
+	shlc
+	phi	r8
+	glo	r7
+	shlc
+	plo	r7
+	ghi	r7
+	shlc
+	phi	r7
+	
+	shlc			; now shift result to bit 3
+	shl
+	shl
+	shl
+	str	rd
+	pop	rd		; recover address
+	push	rd		; save address again
+	ldi	UINT32_DIGITS	; 10 BCD digits to process
+	plo	re
+tobcdlp4:
+	lda	rd		; get current cell
+	str	r2		; save it
+	ldn	rd		; get next cell
+	shr			; shift bit 3 into df
+	shr
+	shr
+	shr
+	ldn	r2		; recover value for current cell
+	shlc			; shift with new bit
+	ani	00001111b	; keep only bottom 4 bits
+	dec	rd		; point back
+	str	rd		; store value
+	inc	rd		; and move to next cell
+	dec	re		; decrement count
+	glo	re		; see if done
+	lbnz	tobcdlp4	; jump if not
+	pop	rd		; recover address
+	dec	r9		; decrement bit count
+	glo	r9		; see if done
+	lbnz	tobcdlp2	; loop until done
+;
+	load	rd,uint32_buf
+	ldi	UINT32_DIGITS
+	plo	r8
+	ldi	UINT32_DIGITS-1	; max 9 leading zeros
+	phi	r8
+loop1:	lda	rd
+	lbz	uint32outz	; check leading zeros
+	str	r2		; save for a moment
+	ldi	0		; signal no more leading zeros
+	phi	r8
+	ldn	r2		; recover character
+itoa2:	adi	'0'
+	str	rf		; store into output buffer
+	inc	rf
+itoa3:	dec	r8
+	glo	r8
+	lbnz	loop1
+	ldi	0		; place terminator in destination
+	str	rf
+	pop	r7
+	pop	r8		; recover consumed registers
+	pop	r9
+	pop	rd
+	retn			; return to caller
+
+uint32outz:
+	ghi	r8		; see if leading have been used up
+	lbz	itoa2		; jump if so
+	smi	1		; decrement count
+	phi	r8
+	lbr	itoa3		; and loop for next character
+;
+	 if	debug
+;
+; ***************************************************
+; ***** Debug output routine			*****
+; ***************************************************
+TTYout:
+	plo	re
+	push	re
+	push	rf
+	push	rd
+	load	rf,hexbuf
+	ldi	0
+	phi	rd
+	glo	re
+	plo	rd
+	call	f_hexout2
+	ldi	' '
+	str	rf
+	inc	rf
+	ldi	0
+	str	rf
+	load	rf,hexbuf
+	call	O_MSG
+	load	rd,hexcount
+	ldn	rd
+	adi	1
+	str	rd
+	smi	16
+	lbnz	NotEOL
+	str	rd
+	call	crlf
+NotEOL:
+	pop	rd
+	pop	rf
+	pop	re
+	retn
+hexbuf:	ds	4
+hexcount:
+	db	0
+	retn
+;
+	 else
+;
+TTYout	equ	f_tty		; non debug output routine
+;
+	 endi
+;
+	page			; The CRC tables must be page aligned
+;
+crcTableLow:
+	db	000h,021h,042h,063h,084h,0a5h,0c6h,0e7h
+	db	008h,029h,04ah,06bh,08ch,0adh,0ceh,0efh
+	db	031h,010h,073h,052h,0b5h,094h,0f7h,0d6h
+	db	039h,018h,07bh,05ah,0bdh,09ch,0ffh,0deh
+	db	062h,043h,020h,001h,0e6h,0c7h,0a4h,085h
+	db	06ah,04bh,028h,009h,0eeh,0cfh,0ach,08dh
+	db	053h,072h,011h,030h,0d7h,0f6h,095h,0b4h
+	db	05bh,07ah,019h,038h,0dfh,0feh,09dh,0bch
+	db	0c4h,0e5h,086h,0a7h,040h,061h,002h,023h
+	db	0cch,0edh,08eh,0afh,048h,069h,00ah,02bh
+	db	0f5h,0d4h,0b7h,096h,071h,050h,033h,012h
+	db	0fdh,0dch,0bfh,09eh,079h,058h,03bh,01ah
+	db	0a6h,087h,0e4h,0c5h,022h,003h,060h,041h
+	db	0aeh,08fh,0ech,0cdh,02ah,00bh,068h,049h
+	db	097h,0b6h,0d5h,0f4h,013h,032h,051h,070h
+	db	09fh,0beh,0ddh,0fch,01bh,03ah,059h,078h
+	db	088h,0a9h,0cah,0ebh,00ch,02dh,04eh,06fh
+	db	080h,0a1h,0c2h,0e3h,004h,025h,046h,067h
+	db	0b9h,098h,0fbh,0dah,03dh,01ch,07fh,05eh
+	db	0b1h,090h,0f3h,0d2h,035h,014h,077h,056h
+	db	0eah,0cbh,0a8h,089h,06eh,04fh,02ch,00dh
+	db	0e2h,0c3h,0a0h,081h,066h,047h,024h,005h
+	db	0dbh,0fah,099h,0b8h,05fh,07eh,01dh,03ch
+	db	0d3h,0f2h,091h,0b0h,057h,076h,015h,034h
+	db	04ch,06dh,00eh,02fh,0c8h,0e9h,08ah,0abh
+	db	044h,065h,006h,027h,0c0h,0e1h,082h,0a3h
+	db	07dh,05ch,03fh,01eh,0f9h,0d8h,0bbh,09ah
+	db	075h,054h,037h,016h,0f1h,0d0h,0b3h,092h
+	db	02eh,00fh,06ch,04dh,0aah,08bh,0e8h,0c9h
+	db	026h,007h,064h,045h,0a2h,083h,0e0h,0c1h
+	db	01fh,03eh,05dh,07ch,09bh,0bah,0d9h,0f8h
+	db	017h,036h,055h,074h,093h,0b2h,0d1h,0f0h
+;
+crcTableHigh:
+	db	000h,010h,020h,030h,040h,050h,060h,070h
+	db	081h,091h,0a1h,0b1h,0c1h,0d1h,0e1h,0f1h
+	db	012h,002h,032h,022h,052h,042h,072h,062h
+	db	093h,083h,0b3h,0a3h,0d3h,0c3h,0f3h,0e3h
+	db	024h,034h,004h,014h,064h,074h,044h,054h
+	db	0a5h,0b5h,085h,095h,0e5h,0f5h,0c5h,0d5h
+	db	036h,026h,016h,006h,076h,066h,056h,046h
+	db	0b7h,0a7h,097h,087h,0f7h,0e7h,0d7h,0c7h
+	db	048h,058h,068h,078h,008h,018h,028h,038h
+	db	0c9h,0d9h,0e9h,0f9h,089h,099h,0a9h,0b9h
+	db	05ah,04ah,07ah,06ah,01ah,00ah,03ah,02ah
+	db	0dbh,0cbh,0fbh,0ebh,09bh,08bh,0bbh,0abh
+	db	06ch,07ch,04ch,05ch,02ch,03ch,00ch,01ch
+	db	0edh,0fdh,0cdh,0ddh,0adh,0bdh,08dh,09dh
+	db	07eh,06eh,05eh,04eh,03eh,02eh,01eh,00eh
+	db	0ffh,0efh,0dfh,0cfh,0bfh,0afh,09fh,08fh
+	db	091h,081h,0b1h,0a1h,0d1h,0c1h,0f1h,0e1h
+	db	010h,000h,030h,020h,050h,040h,070h,060h
+	db	083h,093h,0a3h,0b3h,0c3h,0d3h,0e3h,0f3h
+	db	002h,012h,022h,032h,042h,052h,062h,072h
+	db	0b5h,0a5h,095h,085h,0f5h,0e5h,0d5h,0c5h
+	db	034h,024h,014h,004h,074h,064h,054h,044h
+	db	0a7h,0b7h,087h,097h,0e7h,0f7h,0c7h,0d7h
+	db	026h,036h,006h,016h,066h,076h,046h,056h
+	db	0d9h,0c9h,0f9h,0e9h,099h,089h,0b9h,0a9h
+	db	058h,048h,078h,068h,018h,008h,038h,028h
+	db	0cbh,0dbh,0ebh,0fbh,08bh,09bh,0abh,0bbh
+	db	04ah,05ah,06ah,07ah,00ah,01ah,02ah,03ah
+	db	0fdh,0edh,0ddh,0cdh,0bdh,0adh,09dh,08dh
+	db	07ch,06ch,05ch,04ch,03ch,02ch,01ch,00ch
+	db	0efh,0ffh,0cfh,0dfh,0afh,0bfh,08fh,09fh
+	db	06eh,07eh,04eh,05eh,02eh,03eh,00eh,01eh
+;
+endrom	equ	$
+;
+dta:		ds	512
+uint32_buf:	ds	UINT32_DIGITS+1	
+		ds	128
+localStack:	ds	1
+saveStack:	ds	2
+
+blkNum:		ds	1		; current block #
+blkMode:	ds	1		; 0=checksum, 1=CRC
+fileSize:	ds	4		; # bytes remaining in file
+block0:		ds	128		; buffer for tx/rx
+blockBuffer:
+;
+	end

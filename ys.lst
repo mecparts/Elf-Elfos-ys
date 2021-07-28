@@ -1,0 +1,1173 @@
+                        ; -------------------------------------------------------------------
+                        ; *** ys: send one or more files using YMODEM batch protocol
+                        ; ***
+                        ; *** Build #
+                        ; ***  1: Proof of concept version
+                        ; ***
+                        ; *******************************************************************
+                        ; *** This software is released to the public domain.		  ***
+                        ; *** You have permission to use, modify, copy, and distribute	  ***
+                        ; *** this software as you please.				  ***
+                        ; *******************************************************************
+                        ;
+                        	include	"bios.inc"
+                        ; *******************************************************************
+                        ; *** This software is copyright 2006 by Michael H Riley		***
+                        ; *** You have permission to use, modify, copy, and distribute	***
+                        ; *** this software so long as this copyright notice is retained. ***
+                        ; *** This software may not be used in commercial applications	***
+                        ; *** without express written permission from the author.	 ***
+                        ; *******************************************************************
+                        
+                        ; f_getdev bit values
+                        
+                        b_devIDE	equ	00000001b	; IDE
+                        b_devFLPY	equ	00000010b	; floppy
+                        b_devBBSER	equ	00000100b	; Bit-banged serial
+                        b_devUART	equ	00001000b	; UART
+                        b_devRTC	equ	00010000b	; RTC
+                        b_devNVR	equ	00100000b	; NVRAM
+                        
+                        #ifndef _IS_BIOS
+                        
+                        ; Define address for standard BIOS vectors
+                        BIOS	equ	0ff00h
+                        
+                        ; Define address for extended BIOS vectors
+                        EBIOS	equ	0f800h
+                        
+                        scall	equ	r4			; register for SCALL
+                        sret	equ	r5			; register for SRET
+                        
+                        f_boot		equ	(BIOS+00h)	; boot from ide device
+                        f_type		equ	(BIOS+03h)	; type 1 character to console
+                        f_read		equ	(BIOS+06h)	; read 1 character from console
+                        f_msg		equ	(BIOS+09h)	; type asciiz string to console
+                        f_typex		equ	(BIOS+0ch)	; depricated, just returns now
+                        f_input		equ	(BIOS+0fh)	; read asciiz from console
+                        f_strcmp	equ	(BIOS+12h)	; compare 2 strings
+                        f_ltrim		equ	(BIOS+15h)	; trim leading spaces
+                        f_strcpy	equ	(BIOS+18h)	; copy an asciiz string
+                        f_memcpy	equ	(BIOS+1bh)	; copy memory
+                        f_wrtsec	equ	(BIOS+1eh)	; write floppy sector (depricated)
+                        f_rdsec		equ	(BIOS+21h)	; read floppy sector (depricated)
+                        f_seek0		equ	(BIOS+24h)	; floppy seek to track 0 (depricated)
+                        f_seek		equ	(BIOS+27h)	; floopy track seek (depricated)
+                        f_drive		equ	(BIOS+2ah)	; select floppy drive (depricated)
+                        f_setbd		equ	(BIOS+2dh)	; set console baud rate
+                        f_mul16		equ	(BIOS+30h)	; 16-bit multiply
+                        f_div16		equ	(BIOS+33h)	; 16-bit division
+                        f_idereset	equ	(BIOS+36h)	; reset ide device
+                        f_idewrite	equ	(BIOS+39h)	; write ide sector
+                        f_ideread	equ	(BIOS+3ch)	; read ide sector
+                        f_initcall	equ	(BIOS+3fh)	; initialize R4 and R5
+                        f_bootide	equ	(BIOS+42h)	; boot from ide device
+                        f_hexin		equ	(BIOS+45h)	; convert ascii number to hex
+                        f_hexout2	equ	(BIOS+48h)	; convert hex to 2-digit ascii
+                        f_hexout4	equ	(BIOS+4bh)	; convert hex to 4-digit ascii
+                        f_tty		equ	(BIOS+4eh)	; type character to console
+                        f_mover		equ	(BIOS+51h)	; program relocator
+                        f_minimon	equ	(BIOS+54h)	; mini monitor
+                        f_freemem	equ	(BIOS+57h)	; determine memory size
+                        f_isnum		equ	(BIOS+5ah)	; determine if D is numeric
+                        f_atoi		equ	(BIOS+5dh)	; convert ascii to integer
+                        f_uintout	equ	(BIOS+60h)	; convert unsigned integer to ascii
+                        f_intout	equ	(BIOS+63h)	; convert signed integer to ascii
+                        f_inmsg		equ	(BIOS+66h)	; type in-line message
+                        f_inputl	equ	(BIOS+69h)	; read limited line from console
+                        f_brktest	equ	(BIOS+6ch)	; check for serial break
+                        f_findtkn	equ	(BIOS+6fh)	; find token in a token table
+                        f_isalpha	equ	(BIOS+72h)	; determine if D is alphabetic
+                        f_ishex		equ	(BIOS+75h)	; determine if D is hexadecimal
+                        f_isalnum	equ	(BIOS+78h)	; determine if D is alpha or numeric
+                        f_idnum		equ	(BIOS+7bh)	; determine type of ascii number
+                        f_isterm	equ	(BIOS+7eh)	; determine if D is a termination char
+                        f_getdev	equ	(BIOS+81h)	; get supported devices
+                        
+                        f_version	equ	(BIOS+0f9h)	; 3 bytes holding bios version number
+                        
+                        ; "Extended" BIOS vectors
+                        
+                        f_bread		equ	(EBIOS+00h)	; read from onboard serial port
+                        f_btype		equ	(EBIOS+03h)	; write to onboard serial port
+                        f_btest		equ	(EBIOS+06h)	; test onboard serial port
+                        f_utype		equ	(EBIOS+09h)	; write to disk board UART
+                        f_uread		equ	(EBIOS+0ch)	; read from disk board UART
+                        f_utest		equ	(EBIOS+0fh)	; test disk board UART
+                        f_usetbd	equ	(EBIOS+12h)	; set disk board UART baud rate and format
+                        f_gettod	equ	(EBIOS+15h)	; read time of day clock
+                        f_settod	equ	(EBIOS+18h)	; set time of day clock
+                        f_rdnvr		equ	(EBIOS+1bh)	; read non volatile RAM
+                        f_wrnvr		equ	(EBIOS+1eh)	; write non volatile RAM
+                        f_idesize	equ	(EBIOS+21h)	; return size of attached IDE drive(s)
+                        f_ideid		equ	(EBIOS+24h)	; return device data for IDE drive(s)
+                        f_tmtoas	equ	(EBIOS+2ah)	; time to ASCII string
+                        f_dttoas	equ	(EBIOS+27h)	; date to ASCII string
+                        f_rtctest	equ	(EBIOS+2dh)	; test size and presence of RTC/NVR
+                        f_astodt	equ	(EBIOS+30h)	; convert ASCII string to date
+                        f_astotm	equ	(EBIOS+33h)	; convert ASCII string to time
+                        f_nvrcchk	equ	(EBIOS+36h)	; compute NVR checksum
+                        
+                        #endif
+                        
+                        	include	"kernel.inc"
+                        O_CLDBOOT: equ     0300h               ; jump to cold boot routine
+                        O_WRMBOOT: equ     0303h               ; jump to warm boot routine
+                        O_OPEN:    equ     0306h               ; open a file
+                        O_READ:    equ     0309h               ; read from file
+                        O_WRITE:   equ     030ch               ; write to file
+                        O_SEEK:    equ     030fh               ; seek to file position
+                        O_CLOSE:   equ     0312h               ; close file
+                        O_OPENDIR: equ     0315h               ; open dir as a file
+                        O_DELETE:  equ     0318h               ; delete a file
+                        O_RENAME:  equ     031bh               ; rename a file
+                        O_EXEC:    equ     031eh               ; execute an external program
+                        O_MKDIR:   equ     0321h               ; make directory
+                        O_CHDIR:   equ     0324h               ; change directory
+                        O_RMDIR:   equ     0327h               ; remove directory
+                        O_RDLUMP:  equ     032Ah               ; read LAT entry
+                        O_WRLUMP:  equ     032Dh               ; write LAT entry
+                        O_TYPE:    equ     0330h               ; passthrough for console output
+                        O_MSG:     equ     0333h               ; passthrough for console output
+                        O_READKEY: equ     0336h               ; passthrough for console input
+                        O_INPUT:   equ     0339h               ; passthrough for console input
+                        O_PRTSTAT: equ     033ch               ; printer status
+                        O_PRINT:   equ     033fh               ; output to printer
+                        O_EXECBIN: equ     0342h               ; execute from default directory
+                        O_SETDEF:  equ     0345h               ; set/get default directory
+                        O_KINIT:   equ     0348h               ; reserved - do not use!!!
+                        O_INMSG:   equ     034bh               ; passthrough for console output
+                        O_GETDEV:  equ     034eh               ; passthrough to f_getdef
+                        O_GETTOD:  equ     0351h               ; passthrough to f_gettod
+                        O_SETTOD:  equ     0354h               ; passthrough to f_settod
+                        O_INPUTL:  equ     0357h               ; passthrough to f_inputl
+                        O_BOOT:    equ     035ah               ; passthrough to f_boot
+                        O_SETBD:   equ     0360h               ; passthrough to f_setbd
+                        O_INITCALL: equ    0363h               ; passthrough to f_initcall
+                        O_BRKTEST: equ     0366h               ; passthrough to f_brktest
+                        O_DEVCTRL: equ     0369h               ; passthrough to deverr
+                        O_ALLOC:   equ     036ch               ; passthrough to alloc
+                        O_DEALLOC: equ     036fh               ; passthrough to dealloc
+                        I_SERVE:   equ     03f6h               ; address of interrupt chain head
+                        V_IVEC:    equ     03fdh               ; interrupt head
+                        V_DVEC:    equ     036ah               ; device head
+                        K_VER:     equ     0400h               ; kernel version number
+                        K_BUILD:   equ     0403h               ; kernel build number
+                        K_BMONTH:  equ     0405h               ; kernel build month
+                        K_BDAY:    equ     0406h               ; kernel build day
+                        K_BYEAR:   equ     0407h               ; kernel build month
+                        K_HIMEM:   equ     0442h               ; high memory pointer
+                        K_LOWMEM:  equ     0465h               ; lowest memory heap can use
+                        K_RETVAL:  equ     0467h               ; D on program exit
+                        K_HEAP:    equ     0468h               ; heap pointer
+                        K_CLKFREQ: equ     0470h               ; system clock frequency
+                        K_MONTH:   equ     0475h               ; date/time
+                        K_DAY:     equ     0476h
+                        K_YEAR:    equ     0477h
+                        K_HOUR:    equ     0478h
+                        K_MINUTE:  equ     0479h
+                        K_SECOND:  equ     047ah
+                        K_SECDEN:  equ     047bh
+                        K_SECNUM:  equ     047dh
+                        ;
+                        ;O_HIMEM:   equ     0442h               ; himem value
+                        O_DATTIM:  equ     0475h               ; date/time block
+                        ;
+                        errexists: equ     1
+                        errnoffnd: equ     2
+                        errinvdir: equ     3
+                        errisdir:  equ     4
+                        errdirnotempty: equ   5
+                        errnotexec:     equ   6
+                        ;
+                        O_CREAT	equ	00000001b
+                        O_TRUNC	equ	00000010b
+                        O_APPND	equ	00000100b
+                        
+                        ;	
+                        debug	equ	0
+                        ;
+                        ; ***************************************************
+                        ; ***** Constants				*****
+                        ; ***************************************************
+                        cr	equ	'M'-'@'
+                        lf	equ	'J'-'@'
+                        bs	equ	'H'-'@'
+                        ;
+                        soh	equ	'A'-'@'		; 128 byte packet header
+                        stx	equ	'B'-'@'		; 1K byte packet header
+                        eot	equ	'D'-'@'		; end of file transfer marker
+                        ack	equ	'F'-'@'		; Acknowledge (good packet)
+                        nak	equ	'U'-'@'		; Negative acknowledge (bad packet)
+                        can	equ	'X'-'@'		; cancel transfer
+                        crc	equ	'C'		; use CRC rather than checksum
+                        ;
+                        ; ***************************************************
+                        ; ***** This block is the Execution header for	*****
+                        ; ***** a stand-alone program. It begins 6	*****
+                        ; *****bytes before the program start.		*****
+                        ; ***************************************************
+                        LoadAdr	equ	2000h
+                        	org	LoadAdr-6	; Header starts at 01ffah
+   1ffa   20 00         	dw	LoadAdr
+   1ffc   07 00         	dw	EndRom-LoadAdr
+   1ffe   20 00         	dw	LoadAdr
+                        ;
+                        ; ***************************************************
+                        ; ***** Code start				*****
+                        ; ***************************************************
+   2000   30 34         	br	Start
+                        ;
+                        ; ***************************************************
+                        ; ***** Program header				*****
+                        ; ***************************************************
+   2002   87 1c 07 e5   	date
+   2006   00 01         Build:	dw	1		; build number
+   2008   70 72 6f 6f   	db	'proof of concept build',0
+   200c   66 20 6f 66   
+   2010   20 63 6f 6e   
+   2014   63 65 70 74   
+   2018   20 62 75 69   
+   201c   6c 64 00      
+                        ;
+   201f   00 00 00 00   FilDes:	db	0,0,0,0
+   2023   27 00         	dw	Dta
+   2025   00 00         	db	0,0
+   2027   00            	db	0
+   2028   00 00 00 00   	db	0,0,0,0
+   202c   00 00 00 00   	dw	0,0
+   2030   00 00 00 00   	db	0,0,0,0
+                        ;
+                        ; ***************************************************
+                        ; ***** Main program				*****
+                        ; ***************************************************
+                        start:	
+   2034   86 73 96 73   	push	r6		; save Elf/OS's return address on its stack
+   2038   f8 29 bf f8   	load	rf,saveStack	; save Elf/OS's stack
+   203c   8c af         
+   203e   92            	ghi	r2
+   203f   5f            	str	rf
+   2040   1f            	inc	rf
+   2041   82            	glo	r2
+   2042   5f            	str	rf
+   2043   f8 29 b2 f8   	load	r2,localStack	; use our own stack
+   2047   8b a2         
+   2049   9e            	ghi	re		; turn off console echo
+   204a   fa fe         	ani	11111110b
+   204c   be            	phi	re
+                        ;
+   204d   d4 20 a9      	call	NextFileName	; point to first file name
+   2050   ca 20 7c      	lbnz	NextFile	; and go send it
+   2053   d4 03 4b      	call	O_INMSG		; otherwise display usage message
+   2056   55 73 61 67   	db	'Usage:	ys filename [filename...]',cr,lf,0
+   205a   65 3a 09 79   
+   205e   73 20 66 69   
+   2062   6c 65 6e 61   
+   2066   6d 65 20 5b   
+   206a   66 69 6c 65   
+   206e   6e 61 6d 65   
+   2072   2e 2e 2e 5d   
+   2076   0d 0a 00      
+   2079   c0 20 b2      	lbr	Exit		; and return to os
+                        NextFile:
+   207c   d4 20 c6      	call	SendFile	; send next file
+   207f   d4 20 a9      	call	NextFileName	; point to next file name in cmd tail
+   2082   ca 20 7c      	lbnz	NextFile	; loop for next file
+   2085   d4 22 91      	call	WaitNAK		; wait for receiver to be ready for next file
+   2088   f8 29 bf f8   	load	rf,blknum
+   208c   8e af         
+   208e   f8 00         	ldi	0
+   2090   5f            	str	rf
+   2091   d4 22 5e      	call	ZeroBlock0	; send zero filled block 0 to finish up
+   2094   f8 29 bf f8   	load	rf,block0
+   2098   94 af         
+   209a   f8 00 bc f8   	load	rc,128
+   209e   80 ac         
+   20a0   f8 0a         	ldi	10
+   20a2   a8            	plo	r8
+   20a3   d4 22 d6      	call	SendBlock
+   20a6   c0 20 b2      	lbr	Exit		; and return to os
+                        ;
+                        ; ***************************************************
+                        ; ***** NextFilename: advance RA to the next	*****
+                        ; ***** non space character			*****
+                        ; ***************************************************
+                        NextFileName:
+   20a9   4a            	lda	ra		; move past any spaces
+   20aa   ff 20         	smi	' '
+   20ac   c2 20 a9      	lbz	NextFileName
+   20af   2a            	dec	ra		; move back to non-space character
+   20b0   0a            	ldn	ra		; get byte
+   20b1   d5            	retn
+                        ;
+                        ; ***************************************************
+                        ; ***** Exit: return to Elf/OS, restoring OS	*****
+                        ; *****       stack and R6 contents		*****
+                        ; ***************************************************
+                        Exit:
+   20b2   9e            	ghi	re		; restore console echo
+   20b3   f9 01         	ori	00000001b
+   20b5   be            	phi	re
+   20b6   f8 29 bf f8   	load	rf,saveStack	; restore Elf/OS's stack
+   20ba   8c af         
+   20bc   4f            	lda	rf
+   20bd   b2            	phi	r2
+   20be   0f            	ldn	rf
+   20bf   a2            	plo	r2
+   20c0   60 72 b6 f0   	pop	r6		; restore Elf/OS's return address
+   20c4   a6            
+   20c5   d5            	retn			; return to Elf/OS
+                        ;
+                        ; ***************************************************
+                        ; ***** Send file: send a single file	  	*****
+                        ; ***** RA: points to file name			*****
+                        ; ***************************************************
+                        SendFile:
+   20c6   d4 22 5e      	call	ZeroBlock0
+   20c9   f8 29 bd f8   	load	rd,block0	; copy filename to block
+   20cd   94 ad         
+                        B0loop1:
+   20cf   4a            	lda	ra		; look for first less <= space
+   20d0   5d            	str	rd
+   20d1   1d            	inc	rd
+   20d2   ff 21         	smi	' '+1
+   20d4   c3 20 cf      	lbdf	B0loop1
+   20d7   2a            	dec	ra
+   20d8   2d            	dec	rd
+   20d9   f8 00         	ldi	0		; zero terminate filename
+   20db   5d            	str	rd
+   20dc   1d            	inc	rd
+   20dd   8d 73 9d 73   	push	rd		; save block ptr
+   20e1   f8 20 bd f8   	load	rd,fildes	; get file descriptor
+   20e5   1f ad         
+   20e7   f8 29 bf f8   	load	rf,block0
+   20eb   94 af         
+   20ed   f8 04         	ldi	O_APPND		; flags for open, append
+   20ef   a7            	plo	r7
+   20f0   d4 03 06      	call	O_OPEN		; attempt to open file to determine size
+   20f3   cb 21 1d      	lbnf	B0opened	; jump if file was opened
+   20f6   d4 03 4b      	call	O_INMSG
+   20f9   43 6f 75 6c   	db	'Couldn',27,'t open file: ',0
+   20fd   64 6e 1b 74   
+   2101   20 6f 70 65   
+   2105   6e 20 66 69   
+   2109   6c 65 3a 20   
+   210d   00            
+   210e   f8 29 bf f8   	load	rf,block0
+   2112   94 af         
+   2114   d4 03 33      	call	O_MSG		; display it
+   2117   d4 23 84      	call	crlf
+   211a   c0 20 b2      	lbr	Exit		; and return to os
+                        B0opened:
+   211d   f8 20 bd f8   	load	rd,fildes
+   2121   1f ad         
+   2123   f8 29 bf f8   	load	rf,fileSize
+   2127   90 af         
+   2129   4d            	lda	rd		; put 32 bit offset into
+   212a   b7            	phi	r7		; R7:R8 and fileSize
+   212b   5f            	str	rf
+   212c   1f            	inc	rf
+                        ;
+   212d   4d            	lda	rd
+   212e   a7            	plo	r7
+   212f   5f            	str	rf
+   2130   1f            	inc	rf
+                        ;
+   2131   4d            	lda	rd
+   2132   b8            	phi	r8
+   2133   5f            	str	rf
+   2134   1f            	inc	rf
+                        ;
+   2135   0d            	ldn	rd
+   2136   a8            	plo	r8
+   2137   5f            	str	rf
+                        ;
+   2138   2d            	dec	rd		; restore descriptor
+   2139   2d            	dec	rd
+   213a   2d            	dec	rd
+                        ;
+   213b   87 73 97 73   	push	r7
+   213f   88 73 98 73   	push	r8
+                        ;
+   2143   f8 00 b8 f8   	load	r8,0
+   2147   00 a8         
+   2149   f8 00 b7 f8   	load	r7,0
+   214d   00 a7         
+   214f   f8 20 bd f8   	load	rd,fildes
+   2153   1f ad         
+   2155   f8 00 bc f8   	load	rc,0		; rewind file to start
+   2159   00 ac         
+   215b   d4 03 0f      	call	O_SEEK
+                        ;
+   215e   60 72 b8 f0   	pop	r8
+   2162   a8            
+   2163   60 72 b7 f0   	pop	r7
+   2167   a7            
+   2168   60 72 bf f0   	pop	rf		; restore block ptr
+   216c   af            
+   216d   d4 23 8b      	call	uint32_out	; convert number to ascii
+   2170   f8 20         	ldi	' '		; finish file size with space	
+   2172   5f            	str	rf
+   2173   1f            	inc	rf
+   2174   f8 30         	ldi	'0'		; default modify timestamp to 0
+   2176   5f            	str	rf
+   2177   1f            	inc	rf
+   2178   f8 20         	ldi	' '		; finish timestamp with space	
+   217a   5f            	str	rf
+   217b   1f            	inc	rf
+   217c   f8 30         	ldi	'0'		; default file mode to 0
+   217e   5f            	str	rf
+   217f   5f            	str	rf
+                        ;
+   2180   d4 22 91      	call	WaitNAK
+   2183   ff 43         	smi	crc
+   2185   32 97         	bz	CrcMode
+   2187   ff d2         	smi	nak-crc
+   2189   32 99         	bz	SaveMode
+                        SendFileError:
+   218b   f8 20 bd f8   	load	rd,fildes
+   218f   1f ad         
+   2191   d4 03 12      	call	O_CLOSE
+   2194   ff 00         	smi	0		; DF=1, error
+   2196   d5            	retn
+                        CrcMode:
+   2197   f8 01         	ldi	1
+                        SaveMode:
+   2199   a7            	plo	r7
+   219a   f8 29 bf f8   	load	rf,blkMode
+   219e   8f af         
+   21a0   87            	glo	r7
+   21a1   5f            	str	rf
+                        ;
+   21a2   f8 29 bf f8   	load	rf,blkNum
+   21a6   8e af         
+   21a8   f8 00         	ldi	0
+   21aa   5f            	str	rf
+   21ab   f8 29 bf f8   	load	rf,block0
+   21af   94 af         
+   21b1   f8 00 bc f8   	load	rc,128
+   21b5   80 ac         
+   21b7   f8 0a         	ldi	10
+   21b9   a8            	plo	r8
+   21ba   d4 22 d6      	call	SendBlock	; send file block 0
+   21bd   c3 21 8b      	lbdf	SendFileError
+                        ;
+                        	 if	debug
+                        	call	crlf
+                        	load	rf,hexcount
+                        	ldi	0
+                        	str	rf
+                        	 endif
+   21c0   d4 22 91      	call	WaitNAK
+   21c3   ff 15         	smi	nak
+   21c5   32 cb         	bz	fileSendLoop
+   21c7   ff 2e         	smi	crc-nak
+   21c9   3a 8b         	bnz	SendFileError
+                        ;
+                        FileSendLoop:
+   21cb   f8 29 bf f8   	load	rf,fileSize
+   21cf   90 af         
+   21d1   f8 04 bc f8   	load	rc,1024		; assume we've got at least 1K
+   21d5   00 ac         
+   21d7   4f            	lda	rf		; left to send
+   21d8   ca 21 f3      	lbnz	MoreToGo
+   21db   4f            	lda	rf
+   21dc   ca 21 f3      	lbnz	MoreToGo
+   21df   0f            	ldn	rf
+   21e0   ff 04         	smi	high 1024
+   21e2   c3 21 f3      	lbdf	MoreToGo	; jump if >= 1K left to go
+                        NearingTheEnd:
+   21e5   f8 00 bc f8   	load	rc,128		; switch to 128 byte sectors
+   21e9   80 ac         
+   21eb   4f            	lda	rf
+   21ec   c2 21 f3      	lbz	MoreToGo
+   21ef   0f            	ldn	rf
+   21f0   c2 22 4a      	lbz	FileDone
+                        MoreToGo:
+   21f3   8c 73 9c 73   	push	rc
+   21f7   f8 20 bd f8   	load	rd,fildes
+   21fb   1f ad         
+   21fd   f8 2a bf f8   	load	rf,blockBuffer
+   2201   14 af         
+   2203   d4 03 09      	call	O_READ
+   2206   8c            	glo	rc
+   2207   ca 22 0e      	lbnz	ReadBytes
+   220a   9c            	ghi	rc
+   220b   c2 22 4a      	lbz	FileDone
+                        ReadBytes:
+   220e   f8 29 bf f8   	load	rf,fileSize+3	; LSB
+   2212   93 af         
+                        ;
+   2214   8c            	glo	rc		; decrement fileSize by
+   2215   52            	str	r2		; # bytes read
+   2216   0f            	ldn	rf
+   2217   f7            	sm
+   2218   5f            	str	rf
+                        ;
+   2219   2f            	dec	rf
+   221a   9c            	ghi	rc
+   221b   52            	str	r2
+   221c   0f            	ldn	rf
+   221d   77            	smb
+   221e   5f            	str	rf
+                        ;
+   221f   2f            	dec	rf
+   2220   0f            	ldn	rf
+   2221   7d 00         	sdbi	0
+   2223   5f            	str	rf
+                        ;
+   2224   2f            	dec	rf
+   2225   0f            	ldn	rf
+   2226   7d 00         	sdbi	0
+   2228   5f            	str	rf
+                        ;	
+   2229   60 72 bc f0   	pop	rc		; retrieve block size
+   222d   ac            
+   222e   f8 2a bf f8   	load	rf,blockBuffer
+   2232   14 af         
+   2234   f8 0a         	ldi	10
+   2236   a8            	plo	r8
+   2237   d4 22 d6      	call	SendBlock
+   223a   c3 21 8b      	lbdf	SendFileError
+   223d   ff 06         	smi	ack
+   223f   32 47         	bz	BlockACKed
+   2241   d4 22 6f      	call	Cancel
+   2244   c0 21 8b      	lbr	SendFileError
+                        BlockACKed:
+   2247   c0 21 cb      	lbr	fileSendLoop
+                        FileDone:
+   224a   d4 22 bd      	call	SendEOT		; signal file done and get response
+   224d   ff 06         	smi	ack		; ACK'd?
+   224f   ca 21 8b      	lbnz	SendFileError
+   2252   f8 20 bd f8   	load	rd,fildes
+   2256   1f ad         
+   2258   d4 03 12      	call	O_CLOSE
+   225b   fc 00         	adi	0		; DF=0, no error
+   225d   d5            	retn			; all done!
+                        ;
+                        ; ***************************************************
+                        ; ***** ZeroBlock0: zeroes block 0		*****
+                        ; ***************************************************
+                        ZeroBlock0:
+   225e   f8 29 bf f8   	load	rf,block0
+   2262   94 af         
+                        ZeroLoop:
+   2264   f8 00         	ldi	0
+   2266   5f            	str	rf
+   2267   1f            	inc	rf
+   2268   8f            	glo	rf
+   2269   ff 14         	smi	low (block0+128)
+   226b   ca 22 64      	lbnz	ZeroLoop
+   226e   d5            	retn
+                        ;
+                        ; ***************************************************
+                        ; ***** Cancel: send 8 CANs followed by 8 BSs	*****
+                        ; ***************************************************
+                        Cancel:
+   226f   87 73 97 73   	push	r7
+   2273   f8 08         	ldi	8
+   2275   a7            	plo	r7
+                        cancelLoop:
+   2276   f8 18         	ldi	can
+   2278   d4 ff 4e      	call	TTYout		; send CAN (^X) 8 times
+   227b   27            	dec	r7
+   227c   87            	glo	r7
+   227d   3a 76         	bnz	cancelLoop
+   227f   f8 08         	ldi	8
+   2281   a7            	plo	r7
+                        bsLoop:
+   2282   f8 08         	ldi	bs		; send BS (^H) 8 times
+   2284   d4 ff 4e      	call	TTYout
+   2287   27            	dec	r7
+   2288   87            	glo	r7
+   2289   3a 82         	bnz	bsLoop
+   228b   60 72 b7 f0   	pop	r7
+   228f   a7            
+   2290   d5            	retn
+                        ;
+                        ; ***************************************************
+                        ; ***** WaitNAK: wait for CRC or NAK char	*****
+                        ; ***************************************************
+                        WaitNAK:
+                        	 if	debug
+                        	ldi	crc
+                        	 else	
+   2291   d4 ff 06      	call	f_read
+   2294   ae            	plo	re
+   2295   ff 43         	smi	crc
+   2297   32 9d         	bz	GotNAKorCRC
+   2299   ff d2         	smi	nak-crc
+   229b   3a 91         	bnz	WaitNAK
+                        GotNAKorCRC:
+   229d   8e            	glo	re
+                        	 endi
+   229e   d5            	retn
+                        ;
+                        ; ***************************************************
+                        ; ***** GetACK: wait for ACK/NAK or CAN	char	*****
+                        ; ***************************************************
+                        GetACK:
+                        	 if	debug
+                        	ldi	ack
+                        	 else
+   229f   d4 ff 06      	call	f_read		; read response to block sent
+                        	 endi
+   22a2   ae            	plo	re
+   22a3   ff 06         	smi	ack
+   22a5   c2 22 b5      	lbz	GotACK		; ACK'd, all good
+   22a8   ff 0f         	smi	nak-ack
+   22aa   c2 22 b9      	lbz	DidntGetACK	; NAK'd, probably have to resend
+   22ad   ff 03         	smi	can-nak
+   22af   c2 22 b9      	lbz	DidntGetACK	; CAN'd, terminating transfer
+   22b2   c0 22 9f      	lbr	GetACK
+                        GotACK:
+   22b5   8e            	glo	re
+   22b6   fc 00         	adi	0		; DF = 0, ACKed
+   22b8   d5            	retn
+                        DidntGetACK:
+   22b9   8e            	glo	re
+   22ba   ff 00         	smi	0		; DF = 1, not ACKed
+   22bc   d5            	retn
+                        ;
+                        ; ***************************************************
+                        ; ***** SendEOT: send EOT, wait for ACK		*****
+                        ; ***************************************************
+                        SendEOT:
+   22bd   f8 04         	ldi	eot
+   22bf   d4 ff 4e      	call	TTYout		; send EOT (^D)
+                        	 if	debug
+                        	call	crlf
+                        	push	rf
+                        	load	rf,hexcount
+                        	ldi	0
+                        	str	rf
+                        	pop	rf
+                        	 else
+   22c2   d4 ff 06      	call	f_read
+   22c5   ff 06         	smi	ack		; wait for ACK (^F)
+   22c7   3a bd         	bnz	SendEOT
+                        	 endi
+   22c9   f8 06         	ldi	ack
+   22cb   d5            	retn
+                        ;
+                        ; *******************************************
+                        ; ***** Send file block	  		*****
+                        ; ***** RF - pointer to block		*****
+                        ; ***** RC - Block length		*****
+                        ; ***** R8 - # retries			*****
+                        ; *******************************************
+                        ResendBlock:
+   22cc   60 72 bc f0   	pop	rc
+   22d0   ac            
+   22d1   60 72 bf f0   	pop	rf
+   22d5   af            
+                        SendBlock:
+   22d6   8f 73 9f 73   	push	rf
+   22da   8c 73 9c 73   	push	rc
+   22de   9c            	ghi	rc		; 1K or 128b block?
+   22df   c2 22 e7      	lbz	Send128
+   22e2   f8 02         	ldi	stx		; 1K
+   22e4   c0 22 e9      	lbr	SendStart
+                        Send128:
+   22e7   f8 01         	ldi	soh		; 128b
+                        SendStart:
+   22e9   d4 ff 4e      	call	TTYout		; SOH/STK
+   22ec   f8 29 bd f8   	load	rd,blkNum
+   22f0   8e ad         
+   22f2   0d            	ldn	rd
+   22f3   d4 ff 4e      	call	TTYout		; block #
+   22f6   0d            	ldn	rd
+   22f7   fd ff         	sdi	255
+   22f9   d4 ff 4e      	call	TTYout		; NOT block #
+                        ;
+   22fc   f8 25         	ldi	high crcTableLow
+   22fe   b9            	phi	r9
+   22ff   f8 26         	ldi	high crcTableHigh
+   2301   bb            	phi	rb
+                        ;
+   2302   f8 00 b7 f8   	load	r7,0
+   2306   00 a7         
+   2308   f8 29 bd f8   	load	rd,blkMode
+   230c   8f ad         
+   230e   0d            	ldn	rd		; 0=checksum, 1=CRC
+   230f   c2 23 6b      	lbz	SendWithChecksum
+                        ;
+                        SendWithCRC:
+   2312   0f            	ldn	rf
+   2313   d4 ff 4e      	call	TTYout		; send data byte
+   2316   4f            	lda	rf		; retrieve again and advance ptr
+                        ;
+   2317   52            	str	r2
+   2318   97            	ghi	r7		; j = (crc >> 8) ^ byte
+   2319   f3            	xor
+   231a   a9            	plo	r9
+   231b   ab            	plo	rb
+                        ;
+   231c   87            	glo	r7		; crc = (crc << 8) ^ table[j]
+   231d   eb            	sex	rb
+   231e   f3            	xor
+   231f   e2            	sex	r2
+   2320   b7            	phi	r7
+   2321   09            	ldn	r9
+   2322   a7            	plo	r7
+                        ;
+   2323   2c            	dec	rc		; loop while data bytes
+   2324   9c            	ghi	rc		; left to send
+   2325   3a 12         	bnz	SendWithCRC
+   2327   8c            	glo	rc
+   2328   3a 12         	bnz	SendWithCRC
+                        ;
+   232a   97            	ghi	r7		; send hi byte of CRC
+   232b   d4 ff 4e      	call	TTYout
+   232e   87            	glo	r7		; send lo byte of CRC
+   232f   d4 ff 4e      	call	TTYout
+                        SendBlockACK:
+   2332   d4 22 9f      	call	GetACK
+   2335   a7            	plo	r7
+   2336   ff 06         	smi	ack
+   2338   c2 23 53      	lbz	SendBlockDone	; block ACK'd
+   233b   ff 0f         	smi	nak-ack
+   233d   ca 23 45      	lbnz	SendBlockError
+   2340   28            	dec	r8		; block NAK'd
+   2341   88            	glo	r8		; resend if any retries left
+   2342   ca 22 cc      	lbnz	ResendBlock
+                        SendBlockError:
+   2345   60 72 bc f0   	pop	rc
+   2349   ac            
+   234a   60 72 bf f0   	pop	rf
+   234e   af            
+   234f   87            	glo	r7
+   2350   ff 00         	smi	0		; DF = 1, error
+   2352   d5            	retn
+                        SendBlockDone:
+                        	 if	debug
+                        	call	O_INMSG
+                        	db	cr,lf,'acked',cr,lf,0
+                        	 endi
+   2353   f8 29 bd f8   	load	rd,blknum
+   2357   8e ad         
+   2359   0d            	ldn	rd
+   235a   fc 01         	adi	1		; next block #
+   235c   5d            	str	rd
+   235d   60 72 bc f0   	pop	rc
+   2361   ac            
+   2362   60 72 bf f0   	pop	rf
+   2366   af            
+   2367   87            	glo	r7
+   2368   fc 00         	adi	0		; DF = 0, done
+   236a   d5            	retn
+                        ;
+                        SendWithChecksum:
+   236b   4f            	lda	rf
+   236c   52            	str	r2
+   236d   87            	glo	r7
+   236e   f4            	add
+   236f   a7            	plo	r7
+   2370   02            	ldn	r2
+   2371   d4 ff 4e      	call	TTYout		; send data byte
+   2374   2c            	dec	rc
+   2375   9c            	ghi	rc
+   2376   ca 23 6b      	lbnz	SendWithChecksum
+   2379   8c            	glo	rc
+   237a   ca 23 6b      	lbnz	SendWithChecksum
+   237d   87            	glo	r7
+   237e   d4 ff 4e      	call	TTYout		; send checksum
+   2381   c0 23 32      	lbr	SendBlockACK	; wait for block to be ACK'd/NAK'd
+                        ;
+                        ; ***************************************************
+                        ; ***** Start a new line on the terminal	*****
+                        ; ***************************************************
+                        crlf:
+   2384   d4 03 4b      	call	O_INMSG
+   2387   0d 0a 00      	db	cr,lf,0
+   238a   d5            	retn
+                        ;
+                        ; ***************************************************
+                        ; ***** Convert 32-bit unsigned int to ASCII	*****
+                        ; ***** using the double-dabble algorithm	*****
+                        ; ***** (AKA shift and add 3)			*****
+                        ; ***** R7:R8 - 32-bit integer			*****
+                        ; ***** RF - destination buffer	pointer		*****
+                        ; ***************************************************
+                        UINT32_DIGITS	EQU	10	; maximum of 10 digits in result
+                        UINT32_BITS	EQU	32	; how many bits did you THINK there'd be???
+                        
+                        uint32_out:
+   238b   8d 73 9d 73   	push	rd		; save consumed registers
+   238f   89 73 99 73   	push	r9
+   2393   88 73 98 73   	push	r8
+   2397   87 73 97 73   	push	r7
+   239b   f8 29 bd f8   	load	rd,uint32_buf	; RD is output buffer
+   239f   00 ad         
+                        itoa1:	
+   23a1   8d 73 9d 73   	push	rd		; save buffer pointer
+   23a5   f8 0a         	ldi	UINT32_DIGITS	; clear out BCD buffer
+   23a7   ae            	plo	re
+                        tobcdlp1:
+   23a8   f8 00         	ldi	0
+   23aa   5d            	str	rd		; store into answer
+   23ab   1d            	inc	rd
+   23ac   2e            	dec	re		; decrement count
+   23ad   8e            	glo	re
+   23ae   ca 23 a8      	lbnz	tobcdlp1	; loop until done
+   23b1   60 72 bd f0   	pop	rd		; recover buffer pointer
+   23b5   ad            
+   23b6   f8 20         	ldi	UINT32_BITS	; 32 bits to process
+   23b8   a9            	plo	r9
+                        tobcdlp2:
+   23b9   f8 0a         	ldi	UINT32_DIGITS	; process all 10 digits
+   23bb   ae            	plo	re		; for digits >= 5
+   23bc   8d 73 9d 73   	push	rd		; save buffer pointer
+                        tobcdlp3:
+   23c0   0d            	ldn	rd		; get byte
+   23c1   ff 05         	smi	5		; need to see if 5 or greater
+   23c3   cb 23 c9      	lbnf	tobcdlp3a	; jump if not
+   23c6   fc 08         	adi	5+3		; add 3 to original number
+   23c8   5d            	str	rd		; and put it back
+                        tobcdlp3a:
+   23c9   1d            	inc	rd		; point to next cell
+   23ca   2e            	dec	re		; decrement cell count
+   23cb   8e            	glo	re		; retrieve count
+   23cc   ca 23 c0      	lbnz	tobcdlp3	; loop back if not done
+                        	
+   23cf   88            	glo	r8		; shift 32 bit binary number
+   23d0   fe            	shl			; 1 bit left
+   23d1   a8            	plo	r8
+   23d2   98            	ghi	r8
+   23d3   7e            	shlc
+   23d4   b8            	phi	r8
+   23d5   87            	glo	r7
+   23d6   7e            	shlc
+   23d7   a7            	plo	r7
+   23d8   97            	ghi	r7
+   23d9   7e            	shlc
+   23da   b7            	phi	r7
+                        	
+   23db   7e            	shlc			; now shift result to bit 3
+   23dc   fe            	shl
+   23dd   fe            	shl
+   23de   fe            	shl
+   23df   5d            	str	rd
+   23e0   60 72 bd f0   	pop	rd		; recover address
+   23e4   ad            
+   23e5   8d 73 9d 73   	push	rd		; save address again
+   23e9   f8 0a         	ldi	UINT32_DIGITS	; 10 BCD digits to process
+   23eb   ae            	plo	re
+                        tobcdlp4:
+   23ec   4d            	lda	rd		; get current cell
+   23ed   52            	str	r2		; save it
+   23ee   0d            	ldn	rd		; get next cell
+   23ef   f6            	shr			; shift bit 3 into df
+   23f0   f6            	shr
+   23f1   f6            	shr
+   23f2   f6            	shr
+   23f3   02            	ldn	r2		; recover value for current cell
+   23f4   7e            	shlc			; shift with new bit
+   23f5   fa 0f         	ani	00001111b	; keep only bottom 4 bits
+   23f7   2d            	dec	rd		; point back
+   23f8   5d            	str	rd		; store value
+   23f9   1d            	inc	rd		; and move to next cell
+   23fa   2e            	dec	re		; decrement count
+   23fb   8e            	glo	re		; see if done
+   23fc   ca 23 ec      	lbnz	tobcdlp4	; jump if not
+   23ff   60 72 bd f0   	pop	rd		; recover address
+   2403   ad            
+   2404   29            	dec	r9		; decrement bit count
+   2405   89            	glo	r9		; see if done
+   2406   ca 23 b9      	lbnz	tobcdlp2	; loop until done
+                        ;
+   2409   f8 29 bd f8   	load	rd,uint32_buf
+   240d   00 ad         
+   240f   f8 0a         	ldi	UINT32_DIGITS
+   2411   a8            	plo	r8
+   2412   f8 09         	ldi	UINT32_DIGITS-1	; max 9 leading zeros
+   2414   b8            	phi	r8
+   2415   4d            loop1:	lda	rd
+   2416   c2 24 3f      	lbz	uint32outz	; check leading zeros
+   2419   52            	str	r2		; save for a moment
+   241a   f8 00         	ldi	0		; signal no more leading zeros
+   241c   b8            	phi	r8
+   241d   02            	ldn	r2		; recover character
+   241e   fc 30         itoa2:	adi	'0'
+   2420   5f            	str	rf		; store into output buffer
+   2421   1f            	inc	rf
+   2422   28            itoa3:	dec	r8
+   2423   88            	glo	r8
+   2424   ca 24 15      	lbnz	loop1
+   2427   f8 00         	ldi	0		; place terminator in destination
+   2429   5f            	str	rf
+   242a   60 72 b7 f0   	pop	r7
+   242e   a7            
+   242f   60 72 b8 f0   	pop	r8		; recover consumed registers
+   2433   a8            
+   2434   60 72 b9 f0   	pop	r9
+   2438   a9            
+   2439   60 72 bd f0   	pop	rd
+   243d   ad            
+   243e   d5            	retn			; return to caller
+                        
+                        uint32outz:
+   243f   98            	ghi	r8		; see if leading have been used up
+   2440   c2 24 1e      	lbz	itoa2		; jump if so
+   2443   ff 01         	smi	1		; decrement count
+   2445   b8            	phi	r8
+   2446   c0 24 22      	lbr	itoa3		; and loop for next character
+                        ;
+                        	 if	debug
+                        ;
+                        ; ***************************************************
+                        ; ***** Debug output routine			*****
+                        ; ***************************************************
+                        TTYout:
+                        	plo	re
+                        	push	re
+                        	push	rf
+                        	push	rd
+                        	load	rf,hexbuf
+                        	ldi	0
+                        	phi	rd
+                        	glo	re
+                        	plo	rd
+                        	call	f_hexout2
+                        	ldi	' '
+                        	str	rf
+                        	inc	rf
+                        	ldi	0
+                        	str	rf
+                        	load	rf,hexbuf
+                        	call	O_MSG
+                        	load	rd,hexcount
+                        	ldn	rd
+                        	adi	1
+                        	str	rd
+                        	smi	16
+                        	lbnz	NotEOL
+                        	str	rd
+                        	call	crlf
+                        NotEOL:
+                        	pop	rd
+                        	pop	rf
+                        	pop	re
+                        	retn
+                        hexbuf:	ds	4
+                        hexcount:
+                        	db	0
+                        	retn
+                        ;
+                        	 else
+                        ;
+                        TTYout	equ	f_tty		; non debug output routine
+                        ;
+                        	 endi
+                        ;
+                        	page			; The CRC tables must be page aligned
+                        ;
+                        crcTableLow:
+   2500   00 21 42 63   	db	000h,021h,042h,063h,084h,0a5h,0c6h,0e7h
+   2504   84 a5 c6 e7   
+   2508   08 29 4a 6b   	db	008h,029h,04ah,06bh,08ch,0adh,0ceh,0efh
+   250c   8c ad ce ef   
+   2510   31 10 73 52   	db	031h,010h,073h,052h,0b5h,094h,0f7h,0d6h
+   2514   b5 94 f7 d6   
+   2518   39 18 7b 5a   	db	039h,018h,07bh,05ah,0bdh,09ch,0ffh,0deh
+   251c   bd 9c ff de   
+   2520   62 43 20 01   	db	062h,043h,020h,001h,0e6h,0c7h,0a4h,085h
+   2524   e6 c7 a4 85   
+   2528   6a 4b 28 09   	db	06ah,04bh,028h,009h,0eeh,0cfh,0ach,08dh
+   252c   ee cf ac 8d   
+   2530   53 72 11 30   	db	053h,072h,011h,030h,0d7h,0f6h,095h,0b4h
+   2534   d7 f6 95 b4   
+   2538   5b 7a 19 38   	db	05bh,07ah,019h,038h,0dfh,0feh,09dh,0bch
+   253c   df fe 9d bc   
+   2540   c4 e5 86 a7   	db	0c4h,0e5h,086h,0a7h,040h,061h,002h,023h
+   2544   40 61 02 23   
+   2548   cc ed 8e af   	db	0cch,0edh,08eh,0afh,048h,069h,00ah,02bh
+   254c   48 69 0a 2b   
+   2550   f5 d4 b7 96   	db	0f5h,0d4h,0b7h,096h,071h,050h,033h,012h
+   2554   71 50 33 12   
+   2558   fd dc bf 9e   	db	0fdh,0dch,0bfh,09eh,079h,058h,03bh,01ah
+   255c   79 58 3b 1a   
+   2560   a6 87 e4 c5   	db	0a6h,087h,0e4h,0c5h,022h,003h,060h,041h
+   2564   22 03 60 41   
+   2568   ae 8f ec cd   	db	0aeh,08fh,0ech,0cdh,02ah,00bh,068h,049h
+   256c   2a 0b 68 49   
+   2570   97 b6 d5 f4   	db	097h,0b6h,0d5h,0f4h,013h,032h,051h,070h
+   2574   13 32 51 70   
+   2578   9f be dd fc   	db	09fh,0beh,0ddh,0fch,01bh,03ah,059h,078h
+   257c   1b 3a 59 78   
+   2580   88 a9 ca eb   	db	088h,0a9h,0cah,0ebh,00ch,02dh,04eh,06fh
+   2584   0c 2d 4e 6f   
+   2588   80 a1 c2 e3   	db	080h,0a1h,0c2h,0e3h,004h,025h,046h,067h
+   258c   04 25 46 67   
+   2590   b9 98 fb da   	db	0b9h,098h,0fbh,0dah,03dh,01ch,07fh,05eh
+   2594   3d 1c 7f 5e   
+   2598   b1 90 f3 d2   	db	0b1h,090h,0f3h,0d2h,035h,014h,077h,056h
+   259c   35 14 77 56   
+   25a0   ea cb a8 89   	db	0eah,0cbh,0a8h,089h,06eh,04fh,02ch,00dh
+   25a4   6e 4f 2c 0d   
+   25a8   e2 c3 a0 81   	db	0e2h,0c3h,0a0h,081h,066h,047h,024h,005h
+   25ac   66 47 24 05   
+   25b0   db fa 99 b8   	db	0dbh,0fah,099h,0b8h,05fh,07eh,01dh,03ch
+   25b4   5f 7e 1d 3c   
+   25b8   d3 f2 91 b0   	db	0d3h,0f2h,091h,0b0h,057h,076h,015h,034h
+   25bc   57 76 15 34   
+   25c0   4c 6d 0e 2f   	db	04ch,06dh,00eh,02fh,0c8h,0e9h,08ah,0abh
+   25c4   c8 e9 8a ab   
+   25c8   44 65 06 27   	db	044h,065h,006h,027h,0c0h,0e1h,082h,0a3h
+   25cc   c0 e1 82 a3   
+   25d0   7d 5c 3f 1e   	db	07dh,05ch,03fh,01eh,0f9h,0d8h,0bbh,09ah
+   25d4   f9 d8 bb 9a   
+   25d8   75 54 37 16   	db	075h,054h,037h,016h,0f1h,0d0h,0b3h,092h
+   25dc   f1 d0 b3 92   
+   25e0   2e 0f 6c 4d   	db	02eh,00fh,06ch,04dh,0aah,08bh,0e8h,0c9h
+   25e4   aa 8b e8 c9   
+   25e8   26 07 64 45   	db	026h,007h,064h,045h,0a2h,083h,0e0h,0c1h
+   25ec   a2 83 e0 c1   
+   25f0   1f 3e 5d 7c   	db	01fh,03eh,05dh,07ch,09bh,0bah,0d9h,0f8h
+   25f4   9b ba d9 f8   
+   25f8   17 36 55 74   	db	017h,036h,055h,074h,093h,0b2h,0d1h,0f0h
+   25fc   93 b2 d1 f0   
+                        ;
+                        crcTableHigh:
+   2600   00 10 20 30   	db	000h,010h,020h,030h,040h,050h,060h,070h
+   2604   40 50 60 70   
+   2608   81 91 a1 b1   	db	081h,091h,0a1h,0b1h,0c1h,0d1h,0e1h,0f1h
+   260c   c1 d1 e1 f1   
+   2610   12 02 32 22   	db	012h,002h,032h,022h,052h,042h,072h,062h
+   2614   52 42 72 62   
+   2618   93 83 b3 a3   	db	093h,083h,0b3h,0a3h,0d3h,0c3h,0f3h,0e3h
+   261c   d3 c3 f3 e3   
+   2620   24 34 04 14   	db	024h,034h,004h,014h,064h,074h,044h,054h
+   2624   64 74 44 54   
+   2628   a5 b5 85 95   	db	0a5h,0b5h,085h,095h,0e5h,0f5h,0c5h,0d5h
+   262c   e5 f5 c5 d5   
+   2630   36 26 16 06   	db	036h,026h,016h,006h,076h,066h,056h,046h
+   2634   76 66 56 46   
+   2638   b7 a7 97 87   	db	0b7h,0a7h,097h,087h,0f7h,0e7h,0d7h,0c7h
+   263c   f7 e7 d7 c7   
+   2640   48 58 68 78   	db	048h,058h,068h,078h,008h,018h,028h,038h
+   2644   08 18 28 38   
+   2648   c9 d9 e9 f9   	db	0c9h,0d9h,0e9h,0f9h,089h,099h,0a9h,0b9h
+   264c   89 99 a9 b9   
+   2650   5a 4a 7a 6a   	db	05ah,04ah,07ah,06ah,01ah,00ah,03ah,02ah
+   2654   1a 0a 3a 2a   
+   2658   db cb fb eb   	db	0dbh,0cbh,0fbh,0ebh,09bh,08bh,0bbh,0abh
+   265c   9b 8b bb ab   
+   2660   6c 7c 4c 5c   	db	06ch,07ch,04ch,05ch,02ch,03ch,00ch,01ch
+   2664   2c 3c 0c 1c   
+   2668   ed fd cd dd   	db	0edh,0fdh,0cdh,0ddh,0adh,0bdh,08dh,09dh
+   266c   ad bd 8d 9d   
+   2670   7e 6e 5e 4e   	db	07eh,06eh,05eh,04eh,03eh,02eh,01eh,00eh
+   2674   3e 2e 1e 0e   
+   2678   ff ef df cf   	db	0ffh,0efh,0dfh,0cfh,0bfh,0afh,09fh,08fh
+   267c   bf af 9f 8f   
+   2680   91 81 b1 a1   	db	091h,081h,0b1h,0a1h,0d1h,0c1h,0f1h,0e1h
+   2684   d1 c1 f1 e1   
+   2688   10 00 30 20   	db	010h,000h,030h,020h,050h,040h,070h,060h
+   268c   50 40 70 60   
+   2690   83 93 a3 b3   	db	083h,093h,0a3h,0b3h,0c3h,0d3h,0e3h,0f3h
+   2694   c3 d3 e3 f3   
+   2698   02 12 22 32   	db	002h,012h,022h,032h,042h,052h,062h,072h
+   269c   42 52 62 72   
+   26a0   b5 a5 95 85   	db	0b5h,0a5h,095h,085h,0f5h,0e5h,0d5h,0c5h
+   26a4   f5 e5 d5 c5   
+   26a8   34 24 14 04   	db	034h,024h,014h,004h,074h,064h,054h,044h
+   26ac   74 64 54 44   
+   26b0   a7 b7 87 97   	db	0a7h,0b7h,087h,097h,0e7h,0f7h,0c7h,0d7h
+   26b4   e7 f7 c7 d7   
+   26b8   26 36 06 16   	db	026h,036h,006h,016h,066h,076h,046h,056h
+   26bc   66 76 46 56   
+   26c0   d9 c9 f9 e9   	db	0d9h,0c9h,0f9h,0e9h,099h,089h,0b9h,0a9h
+   26c4   99 89 b9 a9   
+   26c8   58 48 78 68   	db	058h,048h,078h,068h,018h,008h,038h,028h
+   26cc   18 08 38 28   
+   26d0   cb db eb fb   	db	0cbh,0dbh,0ebh,0fbh,08bh,09bh,0abh,0bbh
+   26d4   8b 9b ab bb   
+   26d8   4a 5a 6a 7a   	db	04ah,05ah,06ah,07ah,00ah,01ah,02ah,03ah
+   26dc   0a 1a 2a 3a   
+   26e0   fd ed dd cd   	db	0fdh,0edh,0ddh,0cdh,0bdh,0adh,09dh,08dh
+   26e4   bd ad 9d 8d   
+   26e8   7c 6c 5c 4c   	db	07ch,06ch,05ch,04ch,03ch,02ch,01ch,00ch
+   26ec   3c 2c 1c 0c   
+   26f0   ef ff cf df   	db	0efh,0ffh,0cfh,0dfh,0afh,0bfh,08fh,09fh
+   26f4   af bf 8f 9f   
+   26f8   6e 7e 4e 5e   	db	06eh,07eh,04eh,05eh,02eh,03eh,00eh,01eh
+   26fc   2e 3e 0e 1e   
+                        ;
+                        endrom	equ	$
+                        ;
+                        dta:		ds	512
+                        uint32_buf:	ds	UINT32_DIGITS+1	
+                        		ds	128
+                        localStack:	ds	1
+                        saveStack:	ds	2
+                        
+                        blkNum:		ds	1		; current block #
+                        blkMode:	ds	1		; 0=checksum, 1=CRC
+                        fileSize:	ds	4		; # bytes remaining in file
+                        block0:		ds	128		; buffer for tx/rx
+                        blockBuffer:
+                        ;
+                        	end
+0006  ack           20cf  B0loop1       211d  B0opened      0004  b_devBBSER
+0002  b_devFLPY     0001  b_devIDE      0020  b_devNVR      0010  b_devRTC  
+0008  b_devUART     ff00  BIOS          298f  blkMode       298e  blkNum    
+2994  block0        2247  BlockACKed    2a14  blockBuffer    0008  bs        
+2282  bsLoop        2006  Build         0018  can           226f  Cancel    
+2276  cancelLoop    000d  cr            0043  crc           2197  CrcMode   
+2600  crcTableHigh    2500  crcTableLow    2384  crlf          0000  debug     
+22b9  DidntGetACK    2700  dta           f800  EBIOS         2700  endrom    
+0004  eot           0005  errdirnotempty    0001  errexists     0003  errinvdir 
+0004  errisdir      0002  errnoffnd     0006  errnotexec    20b2  Exit      
+f830  f_astodt      f833  f_astotm      ff5d  f_atoi        ff00  f_boot    
+ff42  f_bootide     f800  f_bread       ff6c  f_brktest     f806  f_btest   
+f803  f_btype       ff33  f_div16       ff2a  f_drive       f827  f_dttoas  
+ff6f  f_findtkn     ff57  f_freemem     ff81  f_getdev      f815  f_gettod  
+ff45  f_hexin       ff48  f_hexout2     ff4b  f_hexout4     f824  f_ideid   
+ff3c  f_ideread     ff36  f_idereset    f821  f_idesize     ff39  f_idewrite
+ff7b  f_idnum       ff3f  f_initcall    ff66  f_inmsg       ff0f  f_input   
+ff69  f_inputl      ff63  f_intout      ff78  f_isalnum     ff72  f_isalpha 
+ff75  f_ishex       ff5a  f_isnum       ff7e  f_isterm      ff15  f_ltrim   
+ff1b  f_memcpy      ff54  f_minimon     ff51  f_mover       ff09  f_msg     
+ff30  f_mul16       f836  f_nvrcchk     f81b  f_rdnvr       ff21  f_rdsec   
+ff06  f_read        f82d  f_rtctest     ff27  f_seek        ff24  f_seek0   
+ff2d  f_setbd       f818  f_settod      ff12  f_strcmp      ff18  f_strcpy  
+f82a  f_tmtoas      ff4e  f_tty         ff03  f_type        ff0c  f_typex   
+ff60  f_uintout     f80c  f_uread       f812  f_usetbd      f80f  f_utest   
+f809  f_utype       fff9  f_version     f81e  f_wrnvr       ff1e  f_wrtsec  
+201f  FilDes        224a  FileDone      21cb  FileSendLoop    2990  fileSize  
+229f  GetACK        22b5  GotACK        229d  GotNAKorCRC    03f6  I_SERVE   
+23a1  itoa1         241e  itoa2         2422  itoa3         0406  K_BDAY    
+0405  K_BMONTH      0403  K_BUILD       0407  K_BYEAR       0470  K_CLKFREQ 
+0476  K_DAY         0468  K_HEAP        0442  K_HIMEM       0478  K_HOUR    
+0465  K_LOWMEM      0479  K_MINUTE      0475  K_MONTH       0467  K_RETVAL  
+047b  K_SECDEN      047d  K_SECNUM      047a  K_SECOND      0400  K_VER     
+0477  K_YEAR        000a  lf            2000  LoadAdr       298b  localStack
+2415  loop1         21f3  MoreToGo      0015  nak           21e5  NearingTheEnd
+207c  NextFile      20a9  NextFileName    036c  O_ALLOC       0004  O_APPND   
+035a  O_BOOT        0366  O_BRKTEST     0324  O_CHDIR       0300  O_CLDBOOT 
+0312  O_CLOSE       0001  O_CREAT       0475  O_DATTIM      036f  O_DEALLOC 
+0318  O_DELETE      0369  O_DEVCTRL     031e  O_EXEC        0342  O_EXECBIN 
+034e  O_GETDEV      0351  O_GETTOD      0363  O_INITCALL    034b  O_INMSG   
+0339  O_INPUT       0357  O_INPUTL      0348  O_KINIT       0321  O_MKDIR   
+0333  O_MSG         0306  O_OPEN        0315  O_OPENDIR     033f  O_PRINT   
+033c  O_PRTSTAT     032a  O_RDLUMP      0309  O_READ        0336  O_READKEY 
+031b  O_RENAME      0327  O_RMDIR       030f  O_SEEK        0360  O_SETBD   
+0345  O_SETDEF      0354  O_SETTOD      0002  O_TRUNC       0330  O_TYPE    
+030c  O_WRITE       032d  O_WRLUMP      0303  O_WRMBOOT     0000  r0        
+0001  r1            000a  r10           000b  r11           000c  r12       
+000d  r13           000e  r14           000f  r15           0002  r2        
+0003  r3            0004  r4            0005  r5            0006  r6        
+0007  r7            0008  r8            0009  r9            000a  ra        
+000b  rb            000c  rc            000d  rd            000e  re        
+220e  ReadBytes     22cc  ResendBlock    000f  rf            2199  SaveMode  
+298c  saveStack     0004  scall         22e7  Send128       22d6  SendBlock 
+2332  SendBlockACK    2353  SendBlockDone    2345  SendBlockError    22bd  SendEOT   
+20c6  SendFile      218b  SendFileError    22e9  SendStart     236b  SendWithChecksum
+2312  SendWithCRC    0001  soh           0005  sret          2034  start     
+0002  stx           23a8  tobcdlp1      23b9  tobcdlp2      23c0  tobcdlp3  
+23c9  tobcdlp3a     23ec  tobcdlp4      ff4e  TTYout        0020  UINT32_BITS
+2900  uint32_buf    000a  UINT32_DIGITS    238b  uint32_out    243f  uint32outz
+036a  V_DVEC        03fd  V_IVEC        2291  WaitNAK       225e  ZeroBlock0
+2264  ZeroLoop      
+
