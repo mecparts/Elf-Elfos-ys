@@ -3,6 +3,8 @@
                         ; ***
                         ; *** Build #
                         ; ***  1: Proof of concept version
+                        ; ***  2: First bug squashed: 256 & 512 byte files were sent 
+                        ; ***     as 0 bytes
                         ; ***
                         ; *******************************************************************
                         ; *** This software is released to the public domain.		  ***
@@ -216,241 +218,246 @@
                         ; ***************************************************
                         ; ***** Code start				*****
                         ; ***************************************************
-   2000   30 34         	br	Start
+   2000   30 49         	br	Start
                         ;
                         ; ***************************************************
                         ; ***** Program header				*****
                         ; ***************************************************
    2002   87 1c 07 e5   	date
-   2006   00 01         Build:	dw	1		; build number
-   2008   70 72 6f 6f   	db	'proof of concept build',0
+   2006   00 02         Build:	dw	2		; build number
+   2008   70 72 6f 6f   	db	'proof of concept & first bug squashed build',0
    200c   66 20 6f 66   
    2010   20 63 6f 6e   
    2014   63 65 70 74   
-   2018   20 62 75 69   
-   201c   6c 64 00      
+   2018   20 26 20 66   
+   201c   69 72 73 74   
+   2020   20 62 75 67   
+   2024   20 73 71 75   
+   2028   61 73 68 65   
+   202c   64 20 62 75   
+   2030   69 6c 64 00   
                         ;
-   201f   00 00 00 00   FilDes:	db	0,0,0,0
-   2023   27 00         	dw	Dta
-   2025   00 00         	db	0,0
-   2027   00            	db	0
-   2028   00 00 00 00   	db	0,0,0,0
-   202c   00 00 00 00   	dw	0,0
-   2030   00 00 00 00   	db	0,0,0,0
+   2034   00 00 00 00   FilDes:	db	0,0,0,0
+   2038   27 00         	dw	Dta
+   203a   00 00         	db	0,0
+   203c   00            	db	0
+   203d   00 00 00 00   	db	0,0,0,0
+   2041   00 00 00 00   	dw	0,0
+   2045   00 00 00 00   	db	0,0,0,0
                         ;
                         ; ***************************************************
                         ; ***** Main program				*****
                         ; ***************************************************
                         start:	
-   2034   86 73 96 73   	push	r6		; save Elf/OS's return address on its stack
-   2038   f8 29 bf f8   	load	rf,saveStack	; save Elf/OS's stack
-   203c   8c af         
-   203e   92            	ghi	r2
-   203f   5f            	str	rf
-   2040   1f            	inc	rf
-   2041   82            	glo	r2
-   2042   5f            	str	rf
-   2043   f8 29 b2 f8   	load	r2,localStack	; use our own stack
-   2047   8b a2         
-   2049   9e            	ghi	re		; turn off console echo
-   204a   fa fe         	ani	11111110b
-   204c   be            	phi	re
+   2049   86 73 96 73   	push	r6		; save Elf/OS's return address on its stack
+   204d   f8 29 bf f8   	load	rf,saveStack	; save Elf/OS's stack
+   2051   8c af         
+   2053   92            	ghi	r2
+   2054   5f            	str	rf
+   2055   1f            	inc	rf
+   2056   82            	glo	r2
+   2057   5f            	str	rf
+   2058   f8 29 b2 f8   	load	r2,localStack	; use our own stack
+   205c   8b a2         
+   205e   9e            	ghi	re		; turn off console echo
+   205f   fa fe         	ani	11111110b
+   2061   be            	phi	re
                         ;
-   204d   d4 20 a9      	call	NextFileName	; point to first file name
-   2050   ca 20 7c      	lbnz	NextFile	; and go send it
-   2053   d4 03 4b      	call	O_INMSG		; otherwise display usage message
-   2056   55 73 61 67   	db	'Usage:	ys filename [filename...]',cr,lf,0
-   205a   65 3a 09 79   
-   205e   73 20 66 69   
-   2062   6c 65 6e 61   
-   2066   6d 65 20 5b   
-   206a   66 69 6c 65   
-   206e   6e 61 6d 65   
-   2072   2e 2e 2e 5d   
-   2076   0d 0a 00      
-   2079   c0 20 b2      	lbr	Exit		; and return to os
+   2062   d4 20 be      	call	NextFileName	; point to first file name
+   2065   ca 20 91      	lbnz	NextFile	; and go send it
+   2068   d4 03 4b      	call	O_INMSG		; otherwise display usage message
+   206b   55 73 61 67   	db	'Usage:	ys filename [filename...]',cr,lf,0
+   206f   65 3a 09 79   
+   2073   73 20 66 69   
+   2077   6c 65 6e 61   
+   207b   6d 65 20 5b   
+   207f   66 69 6c 65   
+   2083   6e 61 6d 65   
+   2087   2e 2e 2e 5d   
+   208b   0d 0a 00      
+   208e   c0 20 c7      	lbr	Exit		; and return to os
                         NextFile:
-   207c   d4 20 c6      	call	SendFile	; send next file
-   207f   d4 20 a9      	call	NextFileName	; point to next file name in cmd tail
-   2082   ca 20 7c      	lbnz	NextFile	; loop for next file
-   2085   d4 22 91      	call	WaitNAK		; wait for receiver to be ready for next file
-   2088   f8 29 bf f8   	load	rf,blknum
-   208c   8e af         
-   208e   f8 00         	ldi	0
-   2090   5f            	str	rf
-   2091   d4 22 5e      	call	ZeroBlock0	; send zero filled block 0 to finish up
-   2094   f8 29 bf f8   	load	rf,block0
-   2098   94 af         
-   209a   f8 00 bc f8   	load	rc,128
-   209e   80 ac         
-   20a0   f8 0a         	ldi	10
-   20a2   a8            	plo	r8
-   20a3   d4 22 d6      	call	SendBlock
-   20a6   c0 20 b2      	lbr	Exit		; and return to os
+   2091   d4 20 db      	call	SendFile	; send next file
+   2094   d4 20 be      	call	NextFileName	; point to next file name in cmd tail
+   2097   ca 20 91      	lbnz	NextFile	; loop for next file
+   209a   d4 22 a6      	call	WaitNAK		; wait for receiver to be ready for next file
+   209d   f8 29 bf f8   	load	rf,blknum
+   20a1   8e af         
+   20a3   f8 00         	ldi	0
+   20a5   5f            	str	rf
+   20a6   d4 22 73      	call	ZeroBlock0	; send zero filled block 0 to finish up
+   20a9   f8 29 bf f8   	load	rf,block0
+   20ad   94 af         
+   20af   f8 00 bc f8   	load	rc,128
+   20b3   80 ac         
+   20b5   f8 0a         	ldi	10
+   20b7   a8            	plo	r8
+   20b8   d4 22 eb      	call	SendBlock
+   20bb   c0 20 c7      	lbr	Exit		; and return to os
                         ;
                         ; ***************************************************
                         ; ***** NextFilename: advance RA to the next	*****
                         ; ***** non space character			*****
                         ; ***************************************************
                         NextFileName:
-   20a9   4a            	lda	ra		; move past any spaces
-   20aa   ff 20         	smi	' '
-   20ac   c2 20 a9      	lbz	NextFileName
-   20af   2a            	dec	ra		; move back to non-space character
-   20b0   0a            	ldn	ra		; get byte
-   20b1   d5            	retn
+   20be   4a            	lda	ra		; move past any spaces
+   20bf   ff 20         	smi	' '
+   20c1   c2 20 be      	lbz	NextFileName
+   20c4   2a            	dec	ra		; move back to non-space character
+   20c5   0a            	ldn	ra		; get byte
+   20c6   d5            	retn
                         ;
                         ; ***************************************************
                         ; ***** Exit: return to Elf/OS, restoring OS	*****
                         ; *****       stack and R6 contents		*****
                         ; ***************************************************
                         Exit:
-   20b2   9e            	ghi	re		; restore console echo
-   20b3   f9 01         	ori	00000001b
-   20b5   be            	phi	re
-   20b6   f8 29 bf f8   	load	rf,saveStack	; restore Elf/OS's stack
-   20ba   8c af         
-   20bc   4f            	lda	rf
-   20bd   b2            	phi	r2
-   20be   0f            	ldn	rf
-   20bf   a2            	plo	r2
-   20c0   60 72 b6 f0   	pop	r6		; restore Elf/OS's return address
-   20c4   a6            
-   20c5   d5            	retn			; return to Elf/OS
+   20c7   9e            	ghi	re		; restore console echo
+   20c8   f9 01         	ori	00000001b
+   20ca   be            	phi	re
+   20cb   f8 29 bf f8   	load	rf,saveStack	; restore Elf/OS's stack
+   20cf   8c af         
+   20d1   4f            	lda	rf
+   20d2   b2            	phi	r2
+   20d3   0f            	ldn	rf
+   20d4   a2            	plo	r2
+   20d5   60 72 b6 f0   	pop	r6		; restore Elf/OS's return address
+   20d9   a6            
+   20da   d5            	retn			; return to Elf/OS
                         ;
                         ; ***************************************************
                         ; ***** Send file: send a single file	  	*****
                         ; ***** RA: points to file name			*****
                         ; ***************************************************
                         SendFile:
-   20c6   d4 22 5e      	call	ZeroBlock0
-   20c9   f8 29 bd f8   	load	rd,block0	; copy filename to block
-   20cd   94 ad         
+   20db   d4 22 73      	call	ZeroBlock0
+   20de   f8 29 bd f8   	load	rd,block0	; copy filename to block
+   20e2   94 ad         
                         B0loop1:
-   20cf   4a            	lda	ra		; look for first less <= space
-   20d0   5d            	str	rd
-   20d1   1d            	inc	rd
-   20d2   ff 21         	smi	' '+1
-   20d4   c3 20 cf      	lbdf	B0loop1
-   20d7   2a            	dec	ra
-   20d8   2d            	dec	rd
-   20d9   f8 00         	ldi	0		; zero terminate filename
-   20db   5d            	str	rd
-   20dc   1d            	inc	rd
-   20dd   8d 73 9d 73   	push	rd		; save block ptr
-   20e1   f8 20 bd f8   	load	rd,fildes	; get file descriptor
-   20e5   1f ad         
-   20e7   f8 29 bf f8   	load	rf,block0
-   20eb   94 af         
-   20ed   f8 04         	ldi	O_APPND		; flags for open, append
-   20ef   a7            	plo	r7
-   20f0   d4 03 06      	call	O_OPEN		; attempt to open file to determine size
-   20f3   cb 21 1d      	lbnf	B0opened	; jump if file was opened
-   20f6   d4 03 4b      	call	O_INMSG
-   20f9   43 6f 75 6c   	db	'Couldn',27,'t open file: ',0
-   20fd   64 6e 1b 74   
-   2101   20 6f 70 65   
-   2105   6e 20 66 69   
-   2109   6c 65 3a 20   
-   210d   00            
-   210e   f8 29 bf f8   	load	rf,block0
-   2112   94 af         
-   2114   d4 03 33      	call	O_MSG		; display it
-   2117   d4 23 84      	call	crlf
-   211a   c0 20 b2      	lbr	Exit		; and return to os
+   20e4   4a            	lda	ra		; look for first less <= space
+   20e5   5d            	str	rd
+   20e6   1d            	inc	rd
+   20e7   ff 21         	smi	' '+1
+   20e9   c3 20 e4      	lbdf	B0loop1
+   20ec   2a            	dec	ra
+   20ed   2d            	dec	rd
+   20ee   f8 00         	ldi	0		; zero terminate filename
+   20f0   5d            	str	rd
+   20f1   1d            	inc	rd
+   20f2   8d 73 9d 73   	push	rd		; save block ptr
+   20f6   f8 20 bd f8   	load	rd,fildes	; get file descriptor
+   20fa   34 ad         
+   20fc   f8 29 bf f8   	load	rf,block0
+   2100   94 af         
+   2102   f8 04         	ldi	O_APPND		; flags for open, append
+   2104   a7            	plo	r7
+   2105   d4 03 06      	call	O_OPEN		; attempt to open file to determine size
+   2108   cb 21 32      	lbnf	B0opened	; jump if file was opened
+   210b   d4 03 4b      	call	O_INMSG
+   210e   43 6f 75 6c   	db	'Couldn',27,'t open file: ',0
+   2112   64 6e 1b 74   
+   2116   20 6f 70 65   
+   211a   6e 20 66 69   
+   211e   6c 65 3a 20   
+   2122   00            
+   2123   f8 29 bf f8   	load	rf,block0
+   2127   94 af         
+   2129   d4 03 33      	call	O_MSG		; display it
+   212c   d4 23 99      	call	crlf
+   212f   c0 20 c7      	lbr	Exit		; and return to os
                         B0opened:
-   211d   f8 20 bd f8   	load	rd,fildes
-   2121   1f ad         
-   2123   f8 29 bf f8   	load	rf,fileSize
-   2127   90 af         
-   2129   4d            	lda	rd		; put 32 bit offset into
-   212a   b7            	phi	r7		; R7:R8 and fileSize
-   212b   5f            	str	rf
-   212c   1f            	inc	rf
+   2132   f8 20 bd f8   	load	rd,fildes
+   2136   34 ad         
+   2138   f8 29 bf f8   	load	rf,fileSize
+   213c   90 af         
+   213e   4d            	lda	rd		; put 32 bit offset into
+   213f   b7            	phi	r7		; R7:R8 and fileSize
+   2140   5f            	str	rf
+   2141   1f            	inc	rf
                         ;
-   212d   4d            	lda	rd
-   212e   a7            	plo	r7
-   212f   5f            	str	rf
-   2130   1f            	inc	rf
+   2142   4d            	lda	rd
+   2143   a7            	plo	r7
+   2144   5f            	str	rf
+   2145   1f            	inc	rf
                         ;
-   2131   4d            	lda	rd
-   2132   b8            	phi	r8
-   2133   5f            	str	rf
-   2134   1f            	inc	rf
+   2146   4d            	lda	rd
+   2147   b8            	phi	r8
+   2148   5f            	str	rf
+   2149   1f            	inc	rf
                         ;
-   2135   0d            	ldn	rd
-   2136   a8            	plo	r8
-   2137   5f            	str	rf
+   214a   0d            	ldn	rd
+   214b   a8            	plo	r8
+   214c   5f            	str	rf
                         ;
-   2138   2d            	dec	rd		; restore descriptor
-   2139   2d            	dec	rd
-   213a   2d            	dec	rd
+   214d   2d            	dec	rd		; restore descriptor
+   214e   2d            	dec	rd
+   214f   2d            	dec	rd
                         ;
-   213b   87 73 97 73   	push	r7
-   213f   88 73 98 73   	push	r8
+   2150   87 73 97 73   	push	r7
+   2154   88 73 98 73   	push	r8
                         ;
-   2143   f8 00 b8 f8   	load	r8,0
-   2147   00 a8         
-   2149   f8 00 b7 f8   	load	r7,0
-   214d   00 a7         
-   214f   f8 20 bd f8   	load	rd,fildes
-   2153   1f ad         
-   2155   f8 00 bc f8   	load	rc,0		; rewind file to start
-   2159   00 ac         
-   215b   d4 03 0f      	call	O_SEEK
+   2158   f8 00 b8 f8   	load	r8,0
+   215c   00 a8         
+   215e   f8 00 b7 f8   	load	r7,0
+   2162   00 a7         
+   2164   f8 20 bd f8   	load	rd,fildes
+   2168   34 ad         
+   216a   f8 00 bc f8   	load	rc,0		; rewind file to start
+   216e   00 ac         
+   2170   d4 03 0f      	call	O_SEEK
                         ;
-   215e   60 72 b8 f0   	pop	r8
-   2162   a8            
-   2163   60 72 b7 f0   	pop	r7
-   2167   a7            
-   2168   60 72 bf f0   	pop	rf		; restore block ptr
-   216c   af            
-   216d   d4 23 8b      	call	uint32_out	; convert number to ascii
-   2170   f8 20         	ldi	' '		; finish file size with space	
-   2172   5f            	str	rf
-   2173   1f            	inc	rf
-   2174   f8 30         	ldi	'0'		; default modify timestamp to 0
-   2176   5f            	str	rf
-   2177   1f            	inc	rf
-   2178   f8 20         	ldi	' '		; finish timestamp with space	
-   217a   5f            	str	rf
-   217b   1f            	inc	rf
-   217c   f8 30         	ldi	'0'		; default file mode to 0
-   217e   5f            	str	rf
-   217f   5f            	str	rf
+   2173   60 72 b8 f0   	pop	r8
+   2177   a8            
+   2178   60 72 b7 f0   	pop	r7
+   217c   a7            
+   217d   60 72 bf f0   	pop	rf		; restore block ptr
+   2181   af            
+   2182   d4 23 a0      	call	uint32_out	; convert number to ascii
+   2185   f8 20         	ldi	' '		; finish file size with space	
+   2187   5f            	str	rf
+   2188   1f            	inc	rf
+   2189   f8 30         	ldi	'0'		; default modify timestamp to 0
+   218b   5f            	str	rf
+   218c   1f            	inc	rf
+   218d   f8 20         	ldi	' '		; finish timestamp with space	
+   218f   5f            	str	rf
+   2190   1f            	inc	rf
+   2191   f8 30         	ldi	'0'		; default file mode to 0
+   2193   5f            	str	rf
+   2194   5f            	str	rf
                         ;
-   2180   d4 22 91      	call	WaitNAK
-   2183   ff 43         	smi	crc
-   2185   32 97         	bz	CrcMode
-   2187   ff d2         	smi	nak-crc
-   2189   32 99         	bz	SaveMode
+   2195   d4 22 a6      	call	WaitNAK
+   2198   ff 43         	smi	crc
+   219a   32 ac         	bz	CrcMode
+   219c   ff d2         	smi	nak-crc
+   219e   32 ae         	bz	SaveMode
                         SendFileError:
-   218b   f8 20 bd f8   	load	rd,fildes
-   218f   1f ad         
-   2191   d4 03 12      	call	O_CLOSE
-   2194   ff 00         	smi	0		; DF=1, error
-   2196   d5            	retn
+   21a0   f8 20 bd f8   	load	rd,fildes
+   21a4   34 ad         
+   21a6   d4 03 12      	call	O_CLOSE
+   21a9   ff 00         	smi	0		; DF=1, error
+   21ab   d5            	retn
                         CrcMode:
-   2197   f8 01         	ldi	1
+   21ac   f8 01         	ldi	1
                         SaveMode:
-   2199   a7            	plo	r7
-   219a   f8 29 bf f8   	load	rf,blkMode
-   219e   8f af         
-   21a0   87            	glo	r7
-   21a1   5f            	str	rf
+   21ae   a7            	plo	r7
+   21af   f8 29 bf f8   	load	rf,blkMode
+   21b3   8f af         
+   21b5   87            	glo	r7
+   21b6   5f            	str	rf
                         ;
-   21a2   f8 29 bf f8   	load	rf,blkNum
-   21a6   8e af         
-   21a8   f8 00         	ldi	0
-   21aa   5f            	str	rf
-   21ab   f8 29 bf f8   	load	rf,block0
-   21af   94 af         
-   21b1   f8 00 bc f8   	load	rc,128
-   21b5   80 ac         
-   21b7   f8 0a         	ldi	10
-   21b9   a8            	plo	r8
-   21ba   d4 22 d6      	call	SendBlock	; send file block 0
-   21bd   c3 21 8b      	lbdf	SendFileError
+   21b7   f8 29 bf f8   	load	rf,blkNum
+   21bb   8e af         
+   21bd   f8 00         	ldi	0
+   21bf   5f            	str	rf
+   21c0   f8 29 bf f8   	load	rf,block0
+   21c4   94 af         
+   21c6   f8 00 bc f8   	load	rc,128
+   21ca   80 ac         
+   21cc   f8 0a         	ldi	10
+   21ce   a8            	plo	r8
+   21cf   d4 22 eb      	call	SendBlock	; send file block 0
+   21d2   c3 21 a0      	lbdf	SendFileError
                         ;
                         	 if	debug
                         	call	crlf
@@ -458,132 +465,132 @@
                         	ldi	0
                         	str	rf
                         	 endif
-   21c0   d4 22 91      	call	WaitNAK
-   21c3   ff 15         	smi	nak
-   21c5   32 cb         	bz	fileSendLoop
-   21c7   ff 2e         	smi	crc-nak
-   21c9   3a 8b         	bnz	SendFileError
+   21d5   d4 22 a6      	call	WaitNAK
+   21d8   ff 15         	smi	nak
+   21da   32 e0         	bz	fileSendLoop
+   21dc   ff 2e         	smi	crc-nak
+   21de   3a a0         	bnz	SendFileError
                         ;
                         FileSendLoop:
-   21cb   f8 29 bf f8   	load	rf,fileSize
-   21cf   90 af         
-   21d1   f8 04 bc f8   	load	rc,1024		; assume we've got at least 1K
-   21d5   00 ac         
-   21d7   4f            	lda	rf		; left to send
-   21d8   ca 21 f3      	lbnz	MoreToGo
-   21db   4f            	lda	rf
-   21dc   ca 21 f3      	lbnz	MoreToGo
-   21df   0f            	ldn	rf
-   21e0   ff 04         	smi	high 1024
-   21e2   c3 21 f3      	lbdf	MoreToGo	; jump if >= 1K left to go
+   21e0   f8 29 bf f8   	load	rf,fileSize
+   21e4   90 af         
+   21e6   f8 04 bc f8   	load	rc,1024		; assume we've got at least 1K
+   21ea   00 ac         
+   21ec   4f            	lda	rf		; left to send
+   21ed   ca 22 08      	lbnz	MoreToGo
+   21f0   4f            	lda	rf
+   21f1   ca 22 08      	lbnz	MoreToGo
+   21f4   0f            	ldn	rf
+   21f5   ff 04         	smi	high 1024
+   21f7   c3 22 08      	lbdf	MoreToGo	; jump if >= 1K left to go
                         NearingTheEnd:
-   21e5   f8 00 bc f8   	load	rc,128		; switch to 128 byte sectors
-   21e9   80 ac         
-   21eb   4f            	lda	rf
-   21ec   c2 21 f3      	lbz	MoreToGo
-   21ef   0f            	ldn	rf
-   21f0   c2 22 4a      	lbz	FileDone
+   21fa   f8 00 bc f8   	load	rc,128		; switch to 128 byte sectors
+   21fe   80 ac         
+   2200   4f            	lda	rf
+   2201   ca 22 08      	lbnz	MoreToGo
+   2204   0f            	ldn	rf
+   2205   c2 22 5f      	lbz	FileDone
                         MoreToGo:
-   21f3   8c 73 9c 73   	push	rc
-   21f7   f8 20 bd f8   	load	rd,fildes
-   21fb   1f ad         
-   21fd   f8 2a bf f8   	load	rf,blockBuffer
-   2201   14 af         
-   2203   d4 03 09      	call	O_READ
-   2206   8c            	glo	rc
-   2207   ca 22 0e      	lbnz	ReadBytes
-   220a   9c            	ghi	rc
-   220b   c2 22 4a      	lbz	FileDone
+   2208   8c 73 9c 73   	push	rc
+   220c   f8 20 bd f8   	load	rd,fildes
+   2210   34 ad         
+   2212   f8 2a bf f8   	load	rf,blockBuffer
+   2216   14 af         
+   2218   d4 03 09      	call	O_READ
+   221b   8c            	glo	rc
+   221c   ca 22 23      	lbnz	ReadBytes
+   221f   9c            	ghi	rc
+   2220   c2 22 5f      	lbz	FileDone
                         ReadBytes:
-   220e   f8 29 bf f8   	load	rf,fileSize+3	; LSB
-   2212   93 af         
+   2223   f8 29 bf f8   	load	rf,fileSize+3	; LSB
+   2227   93 af         
                         ;
-   2214   8c            	glo	rc		; decrement fileSize by
-   2215   52            	str	r2		; # bytes read
-   2216   0f            	ldn	rf
-   2217   f7            	sm
-   2218   5f            	str	rf
+   2229   8c            	glo	rc		; decrement fileSize by
+   222a   52            	str	r2		; # bytes read
+   222b   0f            	ldn	rf
+   222c   f7            	sm
+   222d   5f            	str	rf
                         ;
-   2219   2f            	dec	rf
-   221a   9c            	ghi	rc
-   221b   52            	str	r2
-   221c   0f            	ldn	rf
-   221d   77            	smb
-   221e   5f            	str	rf
+   222e   2f            	dec	rf
+   222f   9c            	ghi	rc
+   2230   52            	str	r2
+   2231   0f            	ldn	rf
+   2232   77            	smb
+   2233   5f            	str	rf
                         ;
-   221f   2f            	dec	rf
-   2220   0f            	ldn	rf
-   2221   7d 00         	sdbi	0
-   2223   5f            	str	rf
+   2234   2f            	dec	rf
+   2235   0f            	ldn	rf
+   2236   7d 00         	sdbi	0
+   2238   5f            	str	rf
                         ;
-   2224   2f            	dec	rf
-   2225   0f            	ldn	rf
-   2226   7d 00         	sdbi	0
-   2228   5f            	str	rf
+   2239   2f            	dec	rf
+   223a   0f            	ldn	rf
+   223b   7d 00         	sdbi	0
+   223d   5f            	str	rf
                         ;	
-   2229   60 72 bc f0   	pop	rc		; retrieve block size
-   222d   ac            
-   222e   f8 2a bf f8   	load	rf,blockBuffer
-   2232   14 af         
-   2234   f8 0a         	ldi	10
-   2236   a8            	plo	r8
-   2237   d4 22 d6      	call	SendBlock
-   223a   c3 21 8b      	lbdf	SendFileError
-   223d   ff 06         	smi	ack
-   223f   32 47         	bz	BlockACKed
-   2241   d4 22 6f      	call	Cancel
-   2244   c0 21 8b      	lbr	SendFileError
+   223e   60 72 bc f0   	pop	rc		; retrieve block size
+   2242   ac            
+   2243   f8 2a bf f8   	load	rf,blockBuffer
+   2247   14 af         
+   2249   f8 0a         	ldi	10
+   224b   a8            	plo	r8
+   224c   d4 22 eb      	call	SendBlock
+   224f   c3 21 a0      	lbdf	SendFileError
+   2252   ff 06         	smi	ack
+   2254   32 5c         	bz	BlockACKed
+   2256   d4 22 84      	call	Cancel
+   2259   c0 21 a0      	lbr	SendFileError
                         BlockACKed:
-   2247   c0 21 cb      	lbr	fileSendLoop
+   225c   c0 21 e0      	lbr	fileSendLoop
                         FileDone:
-   224a   d4 22 bd      	call	SendEOT		; signal file done and get response
-   224d   ff 06         	smi	ack		; ACK'd?
-   224f   ca 21 8b      	lbnz	SendFileError
-   2252   f8 20 bd f8   	load	rd,fildes
-   2256   1f ad         
-   2258   d4 03 12      	call	O_CLOSE
-   225b   fc 00         	adi	0		; DF=0, no error
-   225d   d5            	retn			; all done!
+   225f   d4 22 d2      	call	SendEOT		; signal file done and get response
+   2262   ff 06         	smi	ack		; ACK'd?
+   2264   ca 21 a0      	lbnz	SendFileError
+   2267   f8 20 bd f8   	load	rd,fildes
+   226b   34 ad         
+   226d   d4 03 12      	call	O_CLOSE
+   2270   fc 00         	adi	0		; DF=0, no error
+   2272   d5            	retn			; all done!
                         ;
                         ; ***************************************************
                         ; ***** ZeroBlock0: zeroes block 0		*****
                         ; ***************************************************
                         ZeroBlock0:
-   225e   f8 29 bf f8   	load	rf,block0
-   2262   94 af         
+   2273   f8 29 bf f8   	load	rf,block0
+   2277   94 af         
                         ZeroLoop:
-   2264   f8 00         	ldi	0
-   2266   5f            	str	rf
-   2267   1f            	inc	rf
-   2268   8f            	glo	rf
-   2269   ff 14         	smi	low (block0+128)
-   226b   ca 22 64      	lbnz	ZeroLoop
-   226e   d5            	retn
+   2279   f8 00         	ldi	0
+   227b   5f            	str	rf
+   227c   1f            	inc	rf
+   227d   8f            	glo	rf
+   227e   ff 14         	smi	low (block0+128)
+   2280   ca 22 79      	lbnz	ZeroLoop
+   2283   d5            	retn
                         ;
                         ; ***************************************************
                         ; ***** Cancel: send 8 CANs followed by 8 BSs	*****
                         ; ***************************************************
                         Cancel:
-   226f   87 73 97 73   	push	r7
-   2273   f8 08         	ldi	8
-   2275   a7            	plo	r7
+   2284   87 73 97 73   	push	r7
+   2288   f8 08         	ldi	8
+   228a   a7            	plo	r7
                         cancelLoop:
-   2276   f8 18         	ldi	can
-   2278   d4 ff 4e      	call	TTYout		; send CAN (^X) 8 times
-   227b   27            	dec	r7
-   227c   87            	glo	r7
-   227d   3a 76         	bnz	cancelLoop
-   227f   f8 08         	ldi	8
-   2281   a7            	plo	r7
+   228b   f8 18         	ldi	can
+   228d   d4 ff 4e      	call	TTYout		; send CAN (^X) 8 times
+   2290   27            	dec	r7
+   2291   87            	glo	r7
+   2292   3a 8b         	bnz	cancelLoop
+   2294   f8 08         	ldi	8
+   2296   a7            	plo	r7
                         bsLoop:
-   2282   f8 08         	ldi	bs		; send BS (^H) 8 times
-   2284   d4 ff 4e      	call	TTYout
-   2287   27            	dec	r7
-   2288   87            	glo	r7
-   2289   3a 82         	bnz	bsLoop
-   228b   60 72 b7 f0   	pop	r7
-   228f   a7            
-   2290   d5            	retn
+   2297   f8 08         	ldi	bs		; send BS (^H) 8 times
+   2299   d4 ff 4e      	call	TTYout
+   229c   27            	dec	r7
+   229d   87            	glo	r7
+   229e   3a 97         	bnz	bsLoop
+   22a0   60 72 b7 f0   	pop	r7
+   22a4   a7            
+   22a5   d5            	retn
                         ;
                         ; ***************************************************
                         ; ***** WaitNAK: wait for CRC or NAK char	*****
@@ -592,16 +599,16 @@
                         	 if	debug
                         	ldi	crc
                         	 else	
-   2291   d4 ff 06      	call	f_read
-   2294   ae            	plo	re
-   2295   ff 43         	smi	crc
-   2297   32 9d         	bz	GotNAKorCRC
-   2299   ff d2         	smi	nak-crc
-   229b   3a 91         	bnz	WaitNAK
+   22a6   d4 ff 06      	call	f_read
+   22a9   ae            	plo	re
+   22aa   ff 43         	smi	crc
+   22ac   32 b2         	bz	GotNAKorCRC
+   22ae   ff d2         	smi	nak-crc
+   22b0   3a a6         	bnz	WaitNAK
                         GotNAKorCRC:
-   229d   8e            	glo	re
+   22b2   8e            	glo	re
                         	 endi
-   229e   d5            	retn
+   22b3   d5            	retn
                         ;
                         ; ***************************************************
                         ; ***** GetACK: wait for ACK/NAK or CAN	char	*****
@@ -610,31 +617,31 @@
                         	 if	debug
                         	ldi	ack
                         	 else
-   229f   d4 ff 06      	call	f_read		; read response to block sent
+   22b4   d4 ff 06      	call	f_read		; read response to block sent
                         	 endi
-   22a2   ae            	plo	re
-   22a3   ff 06         	smi	ack
-   22a5   c2 22 b5      	lbz	GotACK		; ACK'd, all good
-   22a8   ff 0f         	smi	nak-ack
-   22aa   c2 22 b9      	lbz	DidntGetACK	; NAK'd, probably have to resend
-   22ad   ff 03         	smi	can-nak
-   22af   c2 22 b9      	lbz	DidntGetACK	; CAN'd, terminating transfer
-   22b2   c0 22 9f      	lbr	GetACK
+   22b7   ae            	plo	re
+   22b8   ff 06         	smi	ack
+   22ba   c2 22 ca      	lbz	GotACK		; ACK'd, all good
+   22bd   ff 0f         	smi	nak-ack
+   22bf   c2 22 ce      	lbz	DidntGetACK	; NAK'd, probably have to resend
+   22c2   ff 03         	smi	can-nak
+   22c4   c2 22 ce      	lbz	DidntGetACK	; CAN'd, terminating transfer
+   22c7   c0 22 b4      	lbr	GetACK
                         GotACK:
-   22b5   8e            	glo	re
-   22b6   fc 00         	adi	0		; DF = 0, ACKed
-   22b8   d5            	retn
+   22ca   8e            	glo	re
+   22cb   fc 00         	adi	0		; DF = 0, ACKed
+   22cd   d5            	retn
                         DidntGetACK:
-   22b9   8e            	glo	re
-   22ba   ff 00         	smi	0		; DF = 1, not ACKed
-   22bc   d5            	retn
+   22ce   8e            	glo	re
+   22cf   ff 00         	smi	0		; DF = 1, not ACKed
+   22d1   d5            	retn
                         ;
                         ; ***************************************************
                         ; ***** SendEOT: send EOT, wait for ACK		*****
                         ; ***************************************************
                         SendEOT:
-   22bd   f8 04         	ldi	eot
-   22bf   d4 ff 4e      	call	TTYout		; send EOT (^D)
+   22d2   f8 04         	ldi	eot
+   22d4   d4 ff 4e      	call	TTYout		; send EOT (^D)
                         	 if	debug
                         	call	crlf
                         	push	rf
@@ -643,12 +650,12 @@
                         	str	rf
                         	pop	rf
                         	 else
-   22c2   d4 ff 06      	call	f_read
-   22c5   ff 06         	smi	ack		; wait for ACK (^F)
-   22c7   3a bd         	bnz	SendEOT
+   22d7   d4 ff 06      	call	f_read
+   22da   ff 06         	smi	ack		; wait for ACK (^F)
+   22dc   3a d2         	bnz	SendEOT
                         	 endi
-   22c9   f8 06         	ldi	ack
-   22cb   d5            	retn
+   22de   f8 06         	ldi	ack
+   22e0   d5            	retn
                         ;
                         ; *******************************************
                         ; ***** Send file block	  		*****
@@ -657,130 +664,130 @@
                         ; ***** R8 - # retries			*****
                         ; *******************************************
                         ResendBlock:
-   22cc   60 72 bc f0   	pop	rc
-   22d0   ac            
-   22d1   60 72 bf f0   	pop	rf
-   22d5   af            
+   22e1   60 72 bc f0   	pop	rc
+   22e5   ac            
+   22e6   60 72 bf f0   	pop	rf
+   22ea   af            
                         SendBlock:
-   22d6   8f 73 9f 73   	push	rf
-   22da   8c 73 9c 73   	push	rc
-   22de   9c            	ghi	rc		; 1K or 128b block?
-   22df   c2 22 e7      	lbz	Send128
-   22e2   f8 02         	ldi	stx		; 1K
-   22e4   c0 22 e9      	lbr	SendStart
+   22eb   8f 73 9f 73   	push	rf
+   22ef   8c 73 9c 73   	push	rc
+   22f3   9c            	ghi	rc		; 1K or 128b block?
+   22f4   c2 22 fc      	lbz	Send128
+   22f7   f8 02         	ldi	stx		; 1K
+   22f9   c0 22 fe      	lbr	SendStart
                         Send128:
-   22e7   f8 01         	ldi	soh		; 128b
+   22fc   f8 01         	ldi	soh		; 128b
                         SendStart:
-   22e9   d4 ff 4e      	call	TTYout		; SOH/STK
-   22ec   f8 29 bd f8   	load	rd,blkNum
-   22f0   8e ad         
-   22f2   0d            	ldn	rd
-   22f3   d4 ff 4e      	call	TTYout		; block #
-   22f6   0d            	ldn	rd
-   22f7   fd ff         	sdi	255
-   22f9   d4 ff 4e      	call	TTYout		; NOT block #
+   22fe   d4 ff 4e      	call	TTYout		; SOH/STK
+   2301   f8 29 bd f8   	load	rd,blkNum
+   2305   8e ad         
+   2307   0d            	ldn	rd
+   2308   d4 ff 4e      	call	TTYout		; block #
+   230b   0d            	ldn	rd
+   230c   fd ff         	sdi	255
+   230e   d4 ff 4e      	call	TTYout		; NOT block #
                         ;
-   22fc   f8 25         	ldi	high crcTableLow
-   22fe   b9            	phi	r9
-   22ff   f8 26         	ldi	high crcTableHigh
-   2301   bb            	phi	rb
+   2311   f8 25         	ldi	high crcTableLow
+   2313   b9            	phi	r9
+   2314   f8 26         	ldi	high crcTableHigh
+   2316   bb            	phi	rb
                         ;
-   2302   f8 00 b7 f8   	load	r7,0
-   2306   00 a7         
-   2308   f8 29 bd f8   	load	rd,blkMode
-   230c   8f ad         
-   230e   0d            	ldn	rd		; 0=checksum, 1=CRC
-   230f   c2 23 6b      	lbz	SendWithChecksum
+   2317   f8 00 b7 f8   	load	r7,0
+   231b   00 a7         
+   231d   f8 29 bd f8   	load	rd,blkMode
+   2321   8f ad         
+   2323   0d            	ldn	rd		; 0=checksum, 1=CRC
+   2324   c2 23 80      	lbz	SendWithChecksum
                         ;
                         SendWithCRC:
-   2312   0f            	ldn	rf
-   2313   d4 ff 4e      	call	TTYout		; send data byte
-   2316   4f            	lda	rf		; retrieve again and advance ptr
+   2327   0f            	ldn	rf
+   2328   d4 ff 4e      	call	TTYout		; send data byte
+   232b   4f            	lda	rf		; retrieve again and advance ptr
                         ;
-   2317   52            	str	r2
-   2318   97            	ghi	r7		; j = (crc >> 8) ^ byte
-   2319   f3            	xor
-   231a   a9            	plo	r9
-   231b   ab            	plo	rb
+   232c   52            	str	r2
+   232d   97            	ghi	r7		; j = (crc >> 8) ^ byte
+   232e   f3            	xor
+   232f   a9            	plo	r9
+   2330   ab            	plo	rb
                         ;
-   231c   87            	glo	r7		; crc = (crc << 8) ^ table[j]
-   231d   eb            	sex	rb
-   231e   f3            	xor
-   231f   e2            	sex	r2
-   2320   b7            	phi	r7
-   2321   09            	ldn	r9
-   2322   a7            	plo	r7
+   2331   87            	glo	r7		; crc = (crc << 8) ^ table[j]
+   2332   eb            	sex	rb
+   2333   f3            	xor
+   2334   e2            	sex	r2
+   2335   b7            	phi	r7
+   2336   09            	ldn	r9
+   2337   a7            	plo	r7
                         ;
-   2323   2c            	dec	rc		; loop while data bytes
-   2324   9c            	ghi	rc		; left to send
-   2325   3a 12         	bnz	SendWithCRC
-   2327   8c            	glo	rc
-   2328   3a 12         	bnz	SendWithCRC
+   2338   2c            	dec	rc		; loop while data bytes
+   2339   9c            	ghi	rc		; left to send
+   233a   3a 27         	bnz	SendWithCRC
+   233c   8c            	glo	rc
+   233d   3a 27         	bnz	SendWithCRC
                         ;
-   232a   97            	ghi	r7		; send hi byte of CRC
-   232b   d4 ff 4e      	call	TTYout
-   232e   87            	glo	r7		; send lo byte of CRC
-   232f   d4 ff 4e      	call	TTYout
+   233f   97            	ghi	r7		; send hi byte of CRC
+   2340   d4 ff 4e      	call	TTYout
+   2343   87            	glo	r7		; send lo byte of CRC
+   2344   d4 ff 4e      	call	TTYout
                         SendBlockACK:
-   2332   d4 22 9f      	call	GetACK
-   2335   a7            	plo	r7
-   2336   ff 06         	smi	ack
-   2338   c2 23 53      	lbz	SendBlockDone	; block ACK'd
-   233b   ff 0f         	smi	nak-ack
-   233d   ca 23 45      	lbnz	SendBlockError
-   2340   28            	dec	r8		; block NAK'd
-   2341   88            	glo	r8		; resend if any retries left
-   2342   ca 22 cc      	lbnz	ResendBlock
+   2347   d4 22 b4      	call	GetACK
+   234a   a7            	plo	r7
+   234b   ff 06         	smi	ack
+   234d   c2 23 68      	lbz	SendBlockDone	; block ACK'd
+   2350   ff 0f         	smi	nak-ack
+   2352   ca 23 5a      	lbnz	SendBlockError
+   2355   28            	dec	r8		; block NAK'd
+   2356   88            	glo	r8		; resend if any retries left
+   2357   ca 22 e1      	lbnz	ResendBlock
                         SendBlockError:
-   2345   60 72 bc f0   	pop	rc
-   2349   ac            
-   234a   60 72 bf f0   	pop	rf
-   234e   af            
-   234f   87            	glo	r7
-   2350   ff 00         	smi	0		; DF = 1, error
-   2352   d5            	retn
+   235a   60 72 bc f0   	pop	rc
+   235e   ac            
+   235f   60 72 bf f0   	pop	rf
+   2363   af            
+   2364   87            	glo	r7
+   2365   ff 00         	smi	0		; DF = 1, error
+   2367   d5            	retn
                         SendBlockDone:
                         	 if	debug
                         	call	O_INMSG
                         	db	cr,lf,'acked',cr,lf,0
                         	 endi
-   2353   f8 29 bd f8   	load	rd,blknum
-   2357   8e ad         
-   2359   0d            	ldn	rd
-   235a   fc 01         	adi	1		; next block #
-   235c   5d            	str	rd
-   235d   60 72 bc f0   	pop	rc
-   2361   ac            
-   2362   60 72 bf f0   	pop	rf
-   2366   af            
-   2367   87            	glo	r7
-   2368   fc 00         	adi	0		; DF = 0, done
-   236a   d5            	retn
+   2368   f8 29 bd f8   	load	rd,blknum
+   236c   8e ad         
+   236e   0d            	ldn	rd
+   236f   fc 01         	adi	1		; next block #
+   2371   5d            	str	rd
+   2372   60 72 bc f0   	pop	rc
+   2376   ac            
+   2377   60 72 bf f0   	pop	rf
+   237b   af            
+   237c   87            	glo	r7
+   237d   fc 00         	adi	0		; DF = 0, done
+   237f   d5            	retn
                         ;
                         SendWithChecksum:
-   236b   4f            	lda	rf
-   236c   52            	str	r2
-   236d   87            	glo	r7
-   236e   f4            	add
-   236f   a7            	plo	r7
-   2370   02            	ldn	r2
-   2371   d4 ff 4e      	call	TTYout		; send data byte
-   2374   2c            	dec	rc
-   2375   9c            	ghi	rc
-   2376   ca 23 6b      	lbnz	SendWithChecksum
-   2379   8c            	glo	rc
-   237a   ca 23 6b      	lbnz	SendWithChecksum
-   237d   87            	glo	r7
-   237e   d4 ff 4e      	call	TTYout		; send checksum
-   2381   c0 23 32      	lbr	SendBlockACK	; wait for block to be ACK'd/NAK'd
+   2380   4f            	lda	rf
+   2381   52            	str	r2
+   2382   87            	glo	r7
+   2383   f4            	add
+   2384   a7            	plo	r7
+   2385   02            	ldn	r2
+   2386   d4 ff 4e      	call	TTYout		; send data byte
+   2389   2c            	dec	rc
+   238a   9c            	ghi	rc
+   238b   ca 23 80      	lbnz	SendWithChecksum
+   238e   8c            	glo	rc
+   238f   ca 23 80      	lbnz	SendWithChecksum
+   2392   87            	glo	r7
+   2393   d4 ff 4e      	call	TTYout		; send checksum
+   2396   c0 23 47      	lbr	SendBlockACK	; wait for block to be ACK'd/NAK'd
                         ;
                         ; ***************************************************
                         ; ***** Start a new line on the terminal	*****
                         ; ***************************************************
                         crlf:
-   2384   d4 03 4b      	call	O_INMSG
-   2387   0d 0a 00      	db	cr,lf,0
-   238a   d5            	retn
+   2399   d4 03 4b      	call	O_INMSG
+   239c   0d 0a 00      	db	cr,lf,0
+   239f   d5            	retn
                         ;
                         ; ***************************************************
                         ; ***** Convert 32-bit unsigned int to ASCII	*****
@@ -793,125 +800,125 @@
                         UINT32_BITS	EQU	32	; how many bits did you THINK there'd be???
                         
                         uint32_out:
-   238b   8d 73 9d 73   	push	rd		; save consumed registers
-   238f   89 73 99 73   	push	r9
-   2393   88 73 98 73   	push	r8
-   2397   87 73 97 73   	push	r7
-   239b   f8 29 bd f8   	load	rd,uint32_buf	; RD is output buffer
-   239f   00 ad         
+   23a0   8d 73 9d 73   	push	rd		; save consumed registers
+   23a4   89 73 99 73   	push	r9
+   23a8   88 73 98 73   	push	r8
+   23ac   87 73 97 73   	push	r7
+   23b0   f8 29 bd f8   	load	rd,uint32_buf	; RD is output buffer
+   23b4   00 ad         
                         itoa1:	
-   23a1   8d 73 9d 73   	push	rd		; save buffer pointer
-   23a5   f8 0a         	ldi	UINT32_DIGITS	; clear out BCD buffer
-   23a7   ae            	plo	re
+   23b6   8d 73 9d 73   	push	rd		; save buffer pointer
+   23ba   f8 0a         	ldi	UINT32_DIGITS	; clear out BCD buffer
+   23bc   ae            	plo	re
                         tobcdlp1:
-   23a8   f8 00         	ldi	0
-   23aa   5d            	str	rd		; store into answer
-   23ab   1d            	inc	rd
-   23ac   2e            	dec	re		; decrement count
-   23ad   8e            	glo	re
-   23ae   ca 23 a8      	lbnz	tobcdlp1	; loop until done
-   23b1   60 72 bd f0   	pop	rd		; recover buffer pointer
-   23b5   ad            
-   23b6   f8 20         	ldi	UINT32_BITS	; 32 bits to process
-   23b8   a9            	plo	r9
+   23bd   f8 00         	ldi	0
+   23bf   5d            	str	rd		; store into answer
+   23c0   1d            	inc	rd
+   23c1   2e            	dec	re		; decrement count
+   23c2   8e            	glo	re
+   23c3   ca 23 bd      	lbnz	tobcdlp1	; loop until done
+   23c6   60 72 bd f0   	pop	rd		; recover buffer pointer
+   23ca   ad            
+   23cb   f8 20         	ldi	UINT32_BITS	; 32 bits to process
+   23cd   a9            	plo	r9
                         tobcdlp2:
-   23b9   f8 0a         	ldi	UINT32_DIGITS	; process all 10 digits
-   23bb   ae            	plo	re		; for digits >= 5
-   23bc   8d 73 9d 73   	push	rd		; save buffer pointer
+   23ce   f8 0a         	ldi	UINT32_DIGITS	; process all 10 digits
+   23d0   ae            	plo	re		; for digits >= 5
+   23d1   8d 73 9d 73   	push	rd		; save buffer pointer
                         tobcdlp3:
-   23c0   0d            	ldn	rd		; get byte
-   23c1   ff 05         	smi	5		; need to see if 5 or greater
-   23c3   cb 23 c9      	lbnf	tobcdlp3a	; jump if not
-   23c6   fc 08         	adi	5+3		; add 3 to original number
-   23c8   5d            	str	rd		; and put it back
+   23d5   0d            	ldn	rd		; get byte
+   23d6   ff 05         	smi	5		; need to see if 5 or greater
+   23d8   cb 23 de      	lbnf	tobcdlp3a	; jump if not
+   23db   fc 08         	adi	5+3		; add 3 to original number
+   23dd   5d            	str	rd		; and put it back
                         tobcdlp3a:
-   23c9   1d            	inc	rd		; point to next cell
-   23ca   2e            	dec	re		; decrement cell count
-   23cb   8e            	glo	re		; retrieve count
-   23cc   ca 23 c0      	lbnz	tobcdlp3	; loop back if not done
+   23de   1d            	inc	rd		; point to next cell
+   23df   2e            	dec	re		; decrement cell count
+   23e0   8e            	glo	re		; retrieve count
+   23e1   ca 23 d5      	lbnz	tobcdlp3	; loop back if not done
                         	
-   23cf   88            	glo	r8		; shift 32 bit binary number
-   23d0   fe            	shl			; 1 bit left
-   23d1   a8            	plo	r8
-   23d2   98            	ghi	r8
-   23d3   7e            	shlc
-   23d4   b8            	phi	r8
-   23d5   87            	glo	r7
-   23d6   7e            	shlc
-   23d7   a7            	plo	r7
-   23d8   97            	ghi	r7
-   23d9   7e            	shlc
-   23da   b7            	phi	r7
+   23e4   88            	glo	r8		; shift 32 bit binary number
+   23e5   fe            	shl			; 1 bit left
+   23e6   a8            	plo	r8
+   23e7   98            	ghi	r8
+   23e8   7e            	shlc
+   23e9   b8            	phi	r8
+   23ea   87            	glo	r7
+   23eb   7e            	shlc
+   23ec   a7            	plo	r7
+   23ed   97            	ghi	r7
+   23ee   7e            	shlc
+   23ef   b7            	phi	r7
                         	
-   23db   7e            	shlc			; now shift result to bit 3
-   23dc   fe            	shl
-   23dd   fe            	shl
-   23de   fe            	shl
-   23df   5d            	str	rd
-   23e0   60 72 bd f0   	pop	rd		; recover address
-   23e4   ad            
-   23e5   8d 73 9d 73   	push	rd		; save address again
-   23e9   f8 0a         	ldi	UINT32_DIGITS	; 10 BCD digits to process
-   23eb   ae            	plo	re
+   23f0   7e            	shlc			; now shift result to bit 3
+   23f1   fe            	shl
+   23f2   fe            	shl
+   23f3   fe            	shl
+   23f4   5d            	str	rd
+   23f5   60 72 bd f0   	pop	rd		; recover address
+   23f9   ad            
+   23fa   8d 73 9d 73   	push	rd		; save address again
+   23fe   f8 0a         	ldi	UINT32_DIGITS	; 10 BCD digits to process
+   2400   ae            	plo	re
                         tobcdlp4:
-   23ec   4d            	lda	rd		; get current cell
-   23ed   52            	str	r2		; save it
-   23ee   0d            	ldn	rd		; get next cell
-   23ef   f6            	shr			; shift bit 3 into df
-   23f0   f6            	shr
-   23f1   f6            	shr
-   23f2   f6            	shr
-   23f3   02            	ldn	r2		; recover value for current cell
-   23f4   7e            	shlc			; shift with new bit
-   23f5   fa 0f         	ani	00001111b	; keep only bottom 4 bits
-   23f7   2d            	dec	rd		; point back
-   23f8   5d            	str	rd		; store value
-   23f9   1d            	inc	rd		; and move to next cell
-   23fa   2e            	dec	re		; decrement count
-   23fb   8e            	glo	re		; see if done
-   23fc   ca 23 ec      	lbnz	tobcdlp4	; jump if not
-   23ff   60 72 bd f0   	pop	rd		; recover address
-   2403   ad            
-   2404   29            	dec	r9		; decrement bit count
-   2405   89            	glo	r9		; see if done
-   2406   ca 23 b9      	lbnz	tobcdlp2	; loop until done
+   2401   4d            	lda	rd		; get current cell
+   2402   52            	str	r2		; save it
+   2403   0d            	ldn	rd		; get next cell
+   2404   f6            	shr			; shift bit 3 into df
+   2405   f6            	shr
+   2406   f6            	shr
+   2407   f6            	shr
+   2408   02            	ldn	r2		; recover value for current cell
+   2409   7e            	shlc			; shift with new bit
+   240a   fa 0f         	ani	00001111b	; keep only bottom 4 bits
+   240c   2d            	dec	rd		; point back
+   240d   5d            	str	rd		; store value
+   240e   1d            	inc	rd		; and move to next cell
+   240f   2e            	dec	re		; decrement count
+   2410   8e            	glo	re		; see if done
+   2411   ca 24 01      	lbnz	tobcdlp4	; jump if not
+   2414   60 72 bd f0   	pop	rd		; recover address
+   2418   ad            
+   2419   29            	dec	r9		; decrement bit count
+   241a   89            	glo	r9		; see if done
+   241b   ca 23 ce      	lbnz	tobcdlp2	; loop until done
                         ;
-   2409   f8 29 bd f8   	load	rd,uint32_buf
-   240d   00 ad         
-   240f   f8 0a         	ldi	UINT32_DIGITS
-   2411   a8            	plo	r8
-   2412   f8 09         	ldi	UINT32_DIGITS-1	; max 9 leading zeros
-   2414   b8            	phi	r8
-   2415   4d            loop1:	lda	rd
-   2416   c2 24 3f      	lbz	uint32outz	; check leading zeros
-   2419   52            	str	r2		; save for a moment
-   241a   f8 00         	ldi	0		; signal no more leading zeros
-   241c   b8            	phi	r8
-   241d   02            	ldn	r2		; recover character
-   241e   fc 30         itoa2:	adi	'0'
-   2420   5f            	str	rf		; store into output buffer
-   2421   1f            	inc	rf
-   2422   28            itoa3:	dec	r8
-   2423   88            	glo	r8
-   2424   ca 24 15      	lbnz	loop1
-   2427   f8 00         	ldi	0		; place terminator in destination
-   2429   5f            	str	rf
-   242a   60 72 b7 f0   	pop	r7
-   242e   a7            
-   242f   60 72 b8 f0   	pop	r8		; recover consumed registers
-   2433   a8            
-   2434   60 72 b9 f0   	pop	r9
-   2438   a9            
-   2439   60 72 bd f0   	pop	rd
-   243d   ad            
-   243e   d5            	retn			; return to caller
+   241e   f8 29 bd f8   	load	rd,uint32_buf
+   2422   00 ad         
+   2424   f8 0a         	ldi	UINT32_DIGITS
+   2426   a8            	plo	r8
+   2427   f8 09         	ldi	UINT32_DIGITS-1	; max 9 leading zeros
+   2429   b8            	phi	r8
+   242a   4d            loop1:	lda	rd
+   242b   c2 24 54      	lbz	uint32outz	; check leading zeros
+   242e   52            	str	r2		; save for a moment
+   242f   f8 00         	ldi	0		; signal no more leading zeros
+   2431   b8            	phi	r8
+   2432   02            	ldn	r2		; recover character
+   2433   fc 30         itoa2:	adi	'0'
+   2435   5f            	str	rf		; store into output buffer
+   2436   1f            	inc	rf
+   2437   28            itoa3:	dec	r8
+   2438   88            	glo	r8
+   2439   ca 24 2a      	lbnz	loop1
+   243c   f8 00         	ldi	0		; place terminator in destination
+   243e   5f            	str	rf
+   243f   60 72 b7 f0   	pop	r7
+   2443   a7            
+   2444   60 72 b8 f0   	pop	r8		; recover consumed registers
+   2448   a8            
+   2449   60 72 b9 f0   	pop	r9
+   244d   a9            
+   244e   60 72 bd f0   	pop	rd
+   2452   ad            
+   2453   d5            	retn			; return to caller
                         
                         uint32outz:
-   243f   98            	ghi	r8		; see if leading have been used up
-   2440   c2 24 1e      	lbz	itoa2		; jump if so
-   2443   ff 01         	smi	1		; decrement count
-   2445   b8            	phi	r8
-   2446   c0 24 22      	lbr	itoa3		; and loop for next character
+   2454   98            	ghi	r8		; see if leading have been used up
+   2455   c2 24 33      	lbz	itoa2		; jump if so
+   2458   ff 01         	smi	1		; decrement count
+   245a   b8            	phi	r8
+   245b   c0 24 37      	lbr	itoa3		; and loop for next character
                         ;
                         	 if	debug
                         ;
@@ -1109,16 +1116,16 @@
                         blockBuffer:
                         ;
                         	end
-0006  ack           20cf  B0loop1       211d  B0opened      0004  b_devBBSER
+0006  ack           20e4  B0loop1       2132  B0opened      0004  b_devBBSER
 0002  b_devFLPY     0001  b_devIDE      0020  b_devNVR      0010  b_devRTC  
 0008  b_devUART     ff00  BIOS          298f  blkMode       298e  blkNum    
-2994  block0        2247  BlockACKed    2a14  blockBuffer    0008  bs        
-2282  bsLoop        2006  Build         0018  can           226f  Cancel    
-2276  cancelLoop    000d  cr            0043  crc           2197  CrcMode   
-2600  crcTableHigh    2500  crcTableLow    2384  crlf          0000  debug     
-22b9  DidntGetACK    2700  dta           f800  EBIOS         2700  endrom    
+2994  block0        225c  BlockACKed    2a14  blockBuffer    0008  bs        
+2297  bsLoop        2006  Build         0018  can           2284  Cancel    
+228b  cancelLoop    000d  cr            0043  crc           21ac  CrcMode   
+2600  crcTableHigh    2500  crcTableLow    2399  crlf          0000  debug     
+22ce  DidntGetACK    2700  dta           f800  EBIOS         2700  endrom    
 0004  eot           0005  errdirnotempty    0001  errexists     0003  errinvdir 
-0004  errisdir      0002  errnoffnd     0006  errnotexec    20b2  Exit      
+0004  errisdir      0002  errnoffnd     0006  errnotexec    20c7  Exit      
 f830  f_astodt      f833  f_astotm      ff5d  f_atoi        ff00  f_boot    
 ff42  f_bootide     f800  f_bread       ff6c  f_brktest     f806  f_btest   
 f803  f_btype       ff33  f_div16       ff2a  f_drive       f827  f_dttoas  
@@ -1135,16 +1142,16 @@ ff2d  f_setbd       f818  f_settod      ff12  f_strcmp      ff18  f_strcpy
 f82a  f_tmtoas      ff4e  f_tty         ff03  f_type        ff0c  f_typex   
 ff60  f_uintout     f80c  f_uread       f812  f_usetbd      f80f  f_utest   
 f809  f_utype       fff9  f_version     f81e  f_wrnvr       ff1e  f_wrtsec  
-201f  FilDes        224a  FileDone      21cb  FileSendLoop    2990  fileSize  
-229f  GetACK        22b5  GotACK        229d  GotNAKorCRC    03f6  I_SERVE   
-23a1  itoa1         241e  itoa2         2422  itoa3         0406  K_BDAY    
+2034  FilDes        225f  FileDone      21e0  FileSendLoop    2990  fileSize  
+22b4  GetACK        22ca  GotACK        22b2  GotNAKorCRC    03f6  I_SERVE   
+23b6  itoa1         2433  itoa2         2437  itoa3         0406  K_BDAY    
 0405  K_BMONTH      0403  K_BUILD       0407  K_BYEAR       0470  K_CLKFREQ 
 0476  K_DAY         0468  K_HEAP        0442  K_HIMEM       0478  K_HOUR    
 0465  K_LOWMEM      0479  K_MINUTE      0475  K_MONTH       0467  K_RETVAL  
 047b  K_SECDEN      047d  K_SECNUM      047a  K_SECOND      0400  K_VER     
 0477  K_YEAR        000a  lf            2000  LoadAdr       298b  localStack
-2415  loop1         21f3  MoreToGo      0015  nak           21e5  NearingTheEnd
-207c  NextFile      20a9  NextFileName    036c  O_ALLOC       0004  O_APPND   
+242a  loop1         2208  MoreToGo      0015  nak           21fa  NearingTheEnd
+2091  NextFile      20be  NextFileName    036c  O_ALLOC       0004  O_APPND   
 035a  O_BOOT        0366  O_BRKTEST     0324  O_CHDIR       0300  O_CLDBOOT 
 0312  O_CLOSE       0001  O_CREAT       0475  O_DATTIM      036f  O_DEALLOC 
 0318  O_DELETE      0369  O_DEVCTRL     031e  O_EXEC        0342  O_EXECBIN 
@@ -1160,14 +1167,14 @@ f809  f_utype       fff9  f_version     f81e  f_wrnvr       ff1e  f_wrtsec
 0003  r3            0004  r4            0005  r5            0006  r6        
 0007  r7            0008  r8            0009  r9            000a  ra        
 000b  rb            000c  rc            000d  rd            000e  re        
-220e  ReadBytes     22cc  ResendBlock    000f  rf            2199  SaveMode  
-298c  saveStack     0004  scall         22e7  Send128       22d6  SendBlock 
-2332  SendBlockACK    2353  SendBlockDone    2345  SendBlockError    22bd  SendEOT   
-20c6  SendFile      218b  SendFileError    22e9  SendStart     236b  SendWithChecksum
-2312  SendWithCRC    0001  soh           0005  sret          2034  start     
-0002  stx           23a8  tobcdlp1      23b9  tobcdlp2      23c0  tobcdlp3  
-23c9  tobcdlp3a     23ec  tobcdlp4      ff4e  TTYout        0020  UINT32_BITS
-2900  uint32_buf    000a  UINT32_DIGITS    238b  uint32_out    243f  uint32outz
-036a  V_DVEC        03fd  V_IVEC        2291  WaitNAK       225e  ZeroBlock0
-2264  ZeroLoop      
+2223  ReadBytes     22e1  ResendBlock    000f  rf            21ae  SaveMode  
+298c  saveStack     0004  scall         22fc  Send128       22eb  SendBlock 
+2347  SendBlockACK    2368  SendBlockDone    235a  SendBlockError    22d2  SendEOT   
+20db  SendFile      21a0  SendFileError    22fe  SendStart     2380  SendWithChecksum
+2327  SendWithCRC    0001  soh           0005  sret          2049  start     
+0002  stx           23bd  tobcdlp1      23ce  tobcdlp2      23d5  tobcdlp3  
+23de  tobcdlp3a     2401  tobcdlp4      ff4e  TTYout        0020  UINT32_BITS
+2900  uint32_buf    000a  UINT32_DIGITS    23a0  uint32_out    2454  uint32outz
+036a  V_DVEC        03fd  V_IVEC        22a6  WaitNAK       2273  ZeroBlock0
+2279  ZeroLoop      
 

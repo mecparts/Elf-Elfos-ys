@@ -3,6 +3,8 @@
 ; ***
 ; *** Build #
 ; ***  1: Proof of concept version
+; ***  2: First bug squashed: 256 & 512 byte files were sent 
+; ***     as 0 bytes
 ; ***
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
@@ -50,8 +52,8 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	1		; build number
-	db	'proof of concept build',0
+Build:	dw	2		; build number
+	db	'proof of concept & first bug squashed build',0
 ;
 FilDes:	db	0,0,0,0
 	dw	Dta
@@ -262,7 +264,7 @@ FileSendLoop:
 NearingTheEnd:
 	load	rc,128		; switch to 128 byte sectors
 	lda	rf
-	lbz	MoreToGo
+	lbnz	MoreToGo
 	ldn	rf
 	lbz	FileDone
 MoreToGo:
