@@ -20,9 +20,10 @@ stragetic 'sleep(1);' calls to lrz and that's got things ticking
 along until I figure out how to make the 1802 code check things
 quicker. 
 
-And I haven't looked at converting the Elf/OS file timestamp to
-a Unix "seconds since 1970 in octal" string yet. As I said, very,
-very alpha.
+Build 3 adds support for sending the file timestamp in block 0. Note
+that Elf/OS has no concept of time zones and to be absolutely correct,
+a time zone correction to the timestamp ought to be applied before
+sending it. But it's good enough for now.
 
 ### Inspiration
 

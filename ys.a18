@@ -5,12 +5,31 @@
 ; ***  1: Proof of concept version
 ; ***  2: First bug squashed: 256 & 512 byte files were sent 
 ; ***     as 0 bytes
-; ***
+; ***  3: Added file timestamp to block 0
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
 ; *** this software as you please.				  ***
 ; *******************************************************************
+;
+; Register usage:
+;
+; System:
+;   r0   - Reserved for DMA
+;   r1   - Reserved for interrupts
+;   r2   - Stack pointer
+;   r3   - Program counter
+;   r4   - SCALL program counter
+;   r5   - SRET program counter
+;   r6   - SCALL return address
+;   re.0 - SCALL overwrites with D
+;   re.1 - Baud rate constant
+;
+; Main program :
+;
+;   ra   - Command line pointer (on exec)
+;
+; All other registers are available for subroutines.
 ;
 	include	"bios.inc"
 	include	"kernel.inc"
@@ -52,16 +71,20 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	2		; build number
-	db	'proof of concept & first bug squashed build',0
+Build:	dw	3		; build number
+	db	'proof of concept & sending file timestamp',0
 ;
-FilDes:	db	0,0,0,0
-	dw	Dta
-	db	0,0
-	db	0
-	db	0,0,0,0
-	dw	0,0
-	db	0,0,0,0
+;
+monthDays:
+	db	31,28,31,30,31,30,31,31,30,31,30,31
+;
+FilDes:	db	0,0,0,0		; current file offset
+	dw	Dta		; DTA
+	dw	0		; eof
+	db	0		; flags
+sector:	db	0,0,0,0		; dir sector
+dirofs:	dw	0		; dir offset
+	db	0,0,0,0		; current sector in DTA
 ;
 ; ***************************************************
 ; ***** Main program				*****
@@ -201,9 +224,218 @@ B0opened:
 	ldi	' '		; finish file size with space	
 	str	rf
 	inc	rf
-	ldi	'0'		; default modify timestamp to 0
+;
+	push	ra
+	push	rf
+	ldi	0e0h		; lba mode
+	phi	r8
+	load	rf,sector+1	; point to dir sector in FILDES
+	lda	rf		; retrieve sector
+	plo	r8
+	lda	rf
+	phi	r7
+	lda	rf
+	plo	r7
+	load	rf,dirbuf	; where to load sector
+	call	f_ideread	; call bios to read the sector
+;
+	load	rf,dirofs+1	; need dirent offset
+	ldn	rf
+	adi	7		; point to date block
+	plo	ra
+	dec	rf
+	ldn	rf
+	adci	0		; propagate carry
+	phi	ra		; r7 now points to date block
+	glo	ra		; now point to correct spot in sector buffer
+	adi	low dirbuf
+	plo	ra
+	ghi	ra
+	adci	high dirbuf
+	phi	ra
+;
+	load	rf,year
+	lda	ra		; get year/month
+	shr			; shift high month bit into DF
+	ldn	ra		; get low bits of month
+	shrc			; shift high bit in
+	shr			; then shift into position
+	shr
+	shr
+	shr
+	inc	rf
+	str	rf		; store month
+	inc	rf		; point to day storage
+	ldn	ra		; recover day
+	ani	31		; mask for day
+	str	rf		; store day
+	dec	rf
+	dec	rf		; point back to year offset storage
+	dec	ra		; point back to year
+	lda	ra		; get year
+	shr			; shift out high bit of month
+	str	rf		; store year offset from 1972
+	inc	rf
+	inc	rf
+	inc	rf		; point to hours storage
+	inc	ra		; point to time
+	ldn	ra		; retrieve hours
+	shr			; shift to proper position
+	shr
+	shr
+	str	rf		; store hours
+	inc	rf		; point to minutes storage
+	lda	ra		; get minutes
+	ani	07h		; strip out hours
+	shl			; shift to needed spot
+	shl
+	shl
+	str	r2		; save for combination
+	ldn	ra		; get low bits of minutes
+	shr			; shift into position
+	shr
+	shr
+	shr
+	shr
+	or			; combine with high bites
+	str	rf		; store minutes
+	inc	rf		; point to seconds storage
+	ldn	ra		; get seconds
+	ani	1fh		; strip minutes out
+	shl			; multiply by 2
+	str	rf		; store seconds	
+;
+	load	rf,year		; point back to year
+	load	r7,03c2h	; number of seconds
+	load	r8,6700h	; from Jan 1 1970 to Jan 1 1972
+	ldn	rf		; year offset from 1972
+	plo	r9
+	ldi	0
+	phi	r9		; leap year counter
+yearLoop:
+	glo	r9
+	bz	yearsDone
+	load	ra,01e1h	; seconds in a year
+	load	rb,3380h
+	call	add32bits
+	ghi	r9
+	ani	00000011b
+	bnz	notLeapYear
+	load	ra,0001h	; seconds in the leap day
+	load	rb,5180h	; (86400)
+	call	add32bits
+notLeapYear:
+	ghi	r9
+	dec	r9
+	adi	1
+	phi	r9
+	lbr	yearLoop
+yearsDone:
+	load	ra,0001h	; seconds in a day
+	load	rb,5180h	; (86400)
+	lda	rf		; re-get year
+	ani	00000011b	; rc.1 will be 0 if leap year
+	phi	rc		; 
+	lda	rf		; month # (1-12)
+	smi	1
+	bz	monthsDone
+	plo	rc		; rc.0 is month # -1
+	load	rd,monthDays
+monthsLoop:
+	lda	rd
+	plo	r9		; rb.0 is # days in month
+monthLoop:
+	call	add32bits	; add a day's worth of seconds
+	dec	r9		; decrement days left in month
+	glo	r9
+	lbnz	monthLoop
+	ghi	rc		; leap year?
+	bnz	noLeapYearChk
+	glo	rd		; test for February
+	smi	low monthDays+2
+	bnz	notFebruary
+	call	add32bits	; add in another day in Feb in leap year	
+noLeapYearChk:
+notFebruary:
+	glo	rc
+	smi	1
+	plo	rc
+	bnz	monthsLoop
+monthsDone:
+	lda	rf		; day of month
+	smi	1
+	bz	domDone
+	plo	r9
+domLoop:
+	call	add32bits
+	dec	r9
+	glo	r9
+	bnz	domLoop
+domDone:
+	load	ra,0
+	load	rb,3600		; seconds in an hour
+	lda	rf
+	bz	hoursDone
+	plo	r9
+hoursLoop:
+	call	add32bits
+	dec	r9
+	glo	r9
+	bnz	hoursLoop
+hoursDone:
+	load	rb,60		; seconds in a minute
+	lda	rf
+	lbz	minutesDone
+	plo	r9
+minutesLoop:
+	call	add32bits
+	dec	r9
+	glo	r9
+	lbnz	minutesLoop
+minutesDone:
+	ldn	rf		; get seconds
+	plo	rb
+	call	add32bits
+;
+	pop	rf		; restore block 0 ptr
+	ldi	'0' shr 2	; convert r7:r8 to octal number
+	phi	r9		; and add to block 0 string
+	ldi	2		; 2 bits on first digit
+	plo	r9
+	ldi	11		; 11 digits in a 32 bit number
+	plo	ra
+bitLoop:
+	glo	r8
+	shl
+	plo	r8
+	ghi	r8
+	shlc
+	phi	r8
+	glo	r7
+	shlc
+	plo	r7
+	ghi	r7
+	shlc
+	phi	r7
+	ghi	r9
+	shlc
+	dec	r9
+	phi	r9
+	glo	r9
+	bnz	bitLoop
+	ghi	r9
 	str	rf
 	inc	rf
+	ldi	'0' shr 3	; next octal digit setup
+	phi	r9
+	ldi	3		; 3 bits for remaining digits
+	plo	r9
+	dec	ra
+	glo	ra
+	bnz	bitLoop
+;
+	pop	ra
+;
 	ldi	' '		; finish timestamp with space	
 	str	rf
 	inc	rf
@@ -213,9 +445,9 @@ B0opened:
 ;
 	call	WaitNAK
 	smi	crc
-	bz	CrcMode
+	lbz	CrcMode
 	smi	nak-crc
-	bz	SaveMode
+	lbz	SaveMode
 SendFileError:
 	load	rd,fildes
 	call	O_CLOSE
@@ -357,7 +589,7 @@ bsLoop:
 	call	TTYout
 	dec	r7
 	glo	r7
-	bnz	bsLoop
+	lbnz	bsLoop
 	pop	r7
 	retn
 ;
@@ -670,6 +902,32 @@ uint32outz:
 	phi	r8
 	lbr	itoa3		; and loop for next character
 ;
+; ***************************************************
+; ***** add32bits: r7:r8 = r7:r8 + ra:rb	*****
+; ***************************************************
+add32bits:
+	glo	rb
+	str	r2
+	glo	r8
+	add
+	plo	r8
+	ghi	rb
+	str	r2
+	ghi	r8
+	adc
+	phi	r8
+	glo	ra
+	str	r2
+	glo	r7
+	adc
+	plo	r7
+	ghi	ra
+	str	r2
+	ghi	r7
+	adc
+	phi	r7
+	retn
+;
 	 if	debug
 ;
 ; ***************************************************
@@ -789,12 +1047,23 @@ crcTableHigh:
 ;
 endrom	equ	$
 ;
-dta:		ds	512
+Dta:		ds	512
 uint32_buf:	ds	UINT32_DIGITS+1	
 		ds	128
 localStack:	ds	1
 saveStack:	ds	2
 
+dirbuf:	ds	512
+;
+year:	ds	1
+month:	ds	1
+dom:	ds	1
+hours:	ds	1
+minutes: ds	1
+seconds: ds	1
+;
+epoch:	ds	4
+;
 blkNum:		ds	1		; current block #
 blkMode:	ds	1		; 0=checksum, 1=CRC
 fileSize:	ds	4		; # bytes remaining in file
