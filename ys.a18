@@ -1,4 +1,5 @@
 ; -------------------------------------------------------------------
+; -------------------------------------------------------------------
 ; *** ys: send one or more files using YMODEM batch protocol
 ; ***
 ; *** Build #
@@ -6,6 +7,8 @@
 ; ***  2: First bug squashed: 256 & 512 byte files were sent 
 ; ***     as 0 bytes
 ; ***  3: Added file timestamp to block 0
+; ***  4: Inlined some Tx/Rx code to make it fast enough to
+; ***     catch the ACK & CRC/NAK at the end of a block send
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -15,7 +18,7 @@
 ; Register usage:
 ;
 ; System:
-;   r0   - Reserved for DMA
+;   r0   - Resesrved for DMA
 ;   r1   - Reserved for interrupts
 ;   r2   - Stack pointer
 ;   r3   - Program counter
@@ -71,8 +74,8 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	3		; build number
-	db	'proof of concept & sending file timestamp',0
+Build:	dw	4		; build number
+	db	'bit banged UART on Q/EF2, inverted',0
 ;
 ;
 monthDays:
@@ -111,11 +114,16 @@ NextFile:
 	call	SendFile	; send next file
 	call	NextFileName	; point to next file name in cmd tail
 	lbnz	NextFile	; loop for next file
-	call	WaitNAK		; wait for receiver to be ready for next file
+	call	WaitNAKorCRC
 	load	rf,blknum
 	ldi	0
 	str	rf
 	call	ZeroBlock0	; send zero filled block 0 to finish up
+	 if	debug=0
+	load	rf,AckedAction
+	ldi	low nextBlock
+	str	rf
+	 endi
 	load	rf,block0
 	load	rc,128
 	ldi	10
@@ -443,7 +451,7 @@ bitLoop:
 	str	rf
 	str	rf
 ;
-	call	WaitNAK
+	call	WaitNAKorCRC
 	smi	crc
 	lbz	CrcMode
 	smi	nak-crc
@@ -461,6 +469,11 @@ SaveMode:
 	glo	r7
 	str	rf
 ;
+	 if	debug=0
+	load	rf,AckedAction
+	ldi	low readne2
+	str	rf
+	 endi
 	load	rf,blkNum
 	ldi	0
 	str	rf
@@ -472,15 +485,17 @@ SaveMode:
 	lbdf	SendFileError
 ;
 	 if	debug
+	pushd
 	call	crlf
 	load	rf,hexcount
 	ldi	0
 	str	rf
+	popd
 	 endif
-	call	WaitNAK
-	smi	nak
+;
+	smi	crc
 	bz	fileSendLoop
-	smi	crc-nak
+	smi	nak-crc
 	bnz	SendFileError
 ;
 FileSendLoop:
@@ -533,8 +548,13 @@ ReadBytes:
 	ldn	rf
 	sdbi	0
 	str	rf
-;	
+;
 	pop	rc		; retrieve block size
+	 if	debug=0
+	load	rf,AckedAction
+	ldi	low nextBlock
+	str	rf
+	 endi
 	load	rf,blockBuffer
 	ldi	10
 	plo	r8
@@ -581,7 +601,7 @@ cancelLoop:
 	call	TTYout		; send CAN (^X) 8 times
 	dec	r7
 	glo	r7
-	bnz	cancelLoop
+	lbnz	cancelLoop
 	ldi	8
 	plo	r7
 bsLoop:
@@ -594,9 +614,9 @@ bsLoop:
 	retn
 ;
 ; ***************************************************
-; ***** WaitNAK: wait for CRC or NAK char	*****
+; ***** WaitNAKorCRC: wait for CRC or NAK char	*****
 ; ***************************************************
-WaitNAK:
+WaitNAKorCRC:
 	 if	debug
 	ldi	crc
 	 else	
@@ -605,7 +625,7 @@ WaitNAK:
 	smi	crc
 	bz	GotNAKorCRC
 	smi	nak-crc
-	bnz	WaitNAK
+	bnz	WaitNAKorCRC
 GotNAKorCRC:
 	glo	re
 	 endi
@@ -665,11 +685,11 @@ SendEOT:
 ; ***** R8 - # retries			*****
 ; *******************************************
 ResendBlock:
-	pop	rc
 	pop	rf
+	pop	rc
 SendBlock:
-	push	rf
 	push	rc
+	push	rf
 	ghi	rc		; 1K or 128b block?
 	lbz	Send128
 	ldi	stx		; 1K
@@ -722,38 +742,7 @@ SendWithCRC:
 ;
 	ghi	r7		; send hi byte of CRC
 	call	TTYout
-	glo	r7		; send lo byte of CRC
-	call	TTYout
-SendBlockACK:
-	call	GetACK
-	plo	r7
-	smi	ack
-	lbz	SendBlockDone	; block ACK'd
-	smi	nak-ack
-	lbnz	SendBlockError
-	dec	r8		; block NAK'd
-	glo	r8		; resend if any retries left
-	lbnz	ResendBlock
-SendBlockError:
-	pop	rc
-	pop	rf
-	glo	r7
-	smi	0		; DF = 1, error
-	retn
-SendBlockDone:
-	 if	debug
-	call	O_INMSG
-	db	cr,lf,'acked',cr,lf,0
-	 endi
-	load	rd,blknum
-	ldn	rd
-	adi	1		; next block #
-	str	rd
-	pop	rc
-	pop	rf
-	glo	r7
-	adi	0		; DF = 0, done
-	retn
+	lbr	DoLastChar
 ;
 SendWithChecksum:
 	lda	rf
@@ -768,9 +757,161 @@ SendWithChecksum:
 	lbnz	SendWithChecksum
 	glo	rc
 	lbnz	SendWithChecksum
+	lbr	DoLastChar
+;
+	page
+;
+; BIOS calls weren't quite fast enough to catch the ACK and CRC/NAK
+; at the end of a block 0 send. They did manage just the ACK at the end
+; of a normal block, most of the time. So, reluctantly, I've had to
+; inline the bit banged UART code. I've got some ideas about auto
+; patching this to match the machine configuration, but it's all in
+; my head at the moment.
+;
+DoLastChar:
+	 if debug
 	glo	r7
-	call	TTYout		; send checksum
-	lbr	SendBlockACK	; wait for block to be ACK'd/NAK'd
+	call	ttyout
+	load	rf,blknum
+	ldn	rf
+	adi	1
+	str	rf
+	load	rf,hexcount
+	ldi	0
+	str	rf
+	call	O_INMSG
+	db	'acked',cr,lf,0
+	pop	rf
+	pop	rc
+	ldi	ack
+	adi	0
+	retn
+	 else
+	ldi	9		; 9 bits to send
+	plo	rf
+	load	rd,delay	; point RD to delay routine
+	sep	rd
+	sep	rd
+	ldi	0
+	shr
+typelp:	bdf	typenb		; jump if no bit
+	req			; set output
+	br	typect
+typenb:	seq			; reset output
+	br	typect
+typect:	sep	rd		; perform bit delay
+	sex	r2
+	sex	r2
+	glo	r7
+	shrc
+	plo	r7
+	dec	rf
+	glo	rf
+	bnz	typelp
+	seq			; set stop bits
+	sep	rd		; wait half the pulse width
+	sep	rd		; wait another half the pulse width
+readne:
+	ldi	9		; 8 bits to receive
+	plo	rf
+	ghi	re		; first delay is half bit size
+	phi	rf
+	shr
+	shr
+	phi	re
+	bn2	$		; wait for transmission
+	sep	rd		; wait half the pulse width
+	ghi	rf		; recover baud constant
+	phi	re
+recvnelp:
+	ghi	rf
+	shr			; shift right
+	b2	recvnelp0	; jump if zero bi
+	ori	128		; set bit
+recvnelp1:
+	phi	rf
+	sep	rd		; perform bit delay
+	dec	rf		; decrement bit count
+	nop
+	nop
+	glo	rf		; check for zero
+	bnz	recvnelp	; loop if not
+recvnedn:
+	sep	rd
+	ghi	rf		; get character
+	plo	re
+
+	smi	ack
+AckedAction equ	$+1
+	bz	readne2		; block ACK'd
+	smi	nak-ack
+	bnz	SendBlockError
+	dec	r8		; block NAK'd
+	glo	r8		; resend if any retries left
+	lbnz	ResendBlock
+SendBlockError:
+	pop	rf
+	pop	rc
+	glo	re
+	smi	0		; DF = 1, error
+	retn
+readne2:
+	ldi	9		; 8 bits to receive
+	plo	rf
+	ghi	re		; first delay is half bit size
+	phi	rf
+	shr
+	shr
+	phi	re
+	bn2	$		; wait for transmission
+	sep	rd		; wait half the pulse width
+	ghi	rf		; recover baud constant
+	phi	re
+recvne2lp:
+	ghi	rf
+	shr			; shift right
+	b2	recvne2lp0	; jump if zero bi
+	ori	128		; set bit
+recvne2lp1:
+	phi	rf
+	sep	rd		; perform bit delay
+	dec	rf		; decrement bit count
+	nop
+	nop
+	glo	rf		; check for zero
+	bnz	recvne2lp	; loop if not
+recvne2dn:
+	ghi	rf		; get character
+	plo	re
+	smi	crc
+	bz	nextBlock
+	smi	nak-crc
+	bnz	SendBlockError
+nextBlock:
+	load	rf,blkNum
+	ldn	rf
+	adi	1
+	str	rf
+	pop	rf
+	pop	rc
+	glo	re
+	adi	0		; DF = 0, ok
+	retn
+recvnelp0:
+	br	recvnelp1	; equalize between 0 and 1
+recvne2lp0:
+	br	recvne2lp1	; equalize between 0 and 1
+;
+delayX:	sep	r3
+delay:	ghi	re		; get baud constant
+	shr			; remove echo flag
+	plo	re		; put into counter
+	sex	r2		; waste a cycle
+delay1:	dec	re		; decrement counter
+	glo	re		; get count
+	bz	delayX		; return if zero
+	br	delay1		; otherwise keep going
+	 endi
 ;
 ; ***************************************************
 ; ***** Start a new line on the terminal	*****
