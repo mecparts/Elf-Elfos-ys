@@ -10,6 +10,7 @@
 ; ***  4: Inlined some Tx/Rx code to make it fast enough to
 ; ***     catch the ACK & CRC/NAK at the end of a block send
 ; ***  5: Dec/hex oops in "Couldn't open file:" message
+; ***  6: missed a "pop rc" when O_READ didn't read any bytes
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -75,7 +76,7 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	5		; build number
+Build:	dw	6		; build number
 	db	'bit banged UART on Q/EF2, inverted',0
 ;
 ;
@@ -523,7 +524,7 @@ MoreToGo:
 	glo	rc
 	lbnz	ReadBytes
 	ghi	rc
-	lbz	FileDone
+	lbz	FileDonePop
 ReadBytes:
 	load	rf,fileSize+3	; LSB
 ;
@@ -567,6 +568,8 @@ ReadBytes:
 	lbr	SendFileError
 BlockACKed:
 	lbr	fileSendLoop
+FileDonePop:
+	pop	rc		; discard block size
 FileDone:
 	call	SendEOT		; signal file done and get response
 	smi	ack		; ACK'd?
