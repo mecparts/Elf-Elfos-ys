@@ -9,6 +9,7 @@
                         ; ***  3: Added file timestamp to block 0
                         ; ***  4: Inlined some Tx/Rx code to make it fast enough to
                         ; ***     catch the ACK & CRC/NAK at the end of a block send
+                        ; ***  5: Dec/hex oops in "Couldn't open file:" message
                         ; *******************************************************************
                         ; *** This software is released to the public domain.		  ***
                         ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -248,7 +249,7 @@
                         ; ***** Program header				*****
                         ; ***************************************************
    2002   87 1f 07 e5   	date
-   2006   00 04         Build:	dw	4		; build number
+   2006   00 05         Build:	dw	5		; build number
    2008   62 69 74 20   	db	'bit banged UART on Q/EF2, inverted',0
    200c   62 61 6e 67   
    2010   65 64 20 55   
@@ -388,8 +389,8 @@
    210f   d4 03 06      	call	O_OPEN		; attempt to open file to determine size
    2112   cb 21 3c      	lbnf	B0opened	; jump if file was opened
    2115   d4 03 4b      	call	O_INMSG
-   2118   43 6f 75 6c   	db	'Couldn',27,'t open file: ',0
-   211c   64 6e 1b 74   
+   2118   43 6f 75 6c   	db	'Couldn',27h,'t open file: ',0
+   211c   64 6e 27 74   
    2120   20 6f 70 65   
    2124   6e 20 66 69   
    2128   6c 65 3a 20   

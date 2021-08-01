@@ -9,6 +9,7 @@
 ; ***  3: Added file timestamp to block 0
 ; ***  4: Inlined some Tx/Rx code to make it fast enough to
 ; ***     catch the ACK & CRC/NAK at the end of a block send
+; ***  5: Dec/hex oops in "Couldn't open file:" message
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -74,7 +75,7 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	4		; build number
+Build:	dw	5		; build number
 	db	'bit banged UART on Q/EF2, inverted',0
 ;
 ;
@@ -185,7 +186,7 @@ B0loop1:
 	call	O_OPEN		; attempt to open file to determine size
 	lbnf	B0opened	; jump if file was opened
 	call	O_INMSG
-	db	'Couldn',27,'t open file: ',0
+	db	'Couldn',27h,'t open file: ',0
 	load	rf,block0
 	call	O_MSG		; display it
 	call	crlf
