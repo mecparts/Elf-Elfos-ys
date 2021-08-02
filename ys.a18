@@ -11,6 +11,11 @@
 ; ***     catch the ACK & CRC/NAK at the end of a block send
 ; ***  5: Dec/hex oops in "Couldn't open file:" message
 ; ***  6: missed a "pop rc" when O_READ didn't read any bytes
+; ***  7: moved endrom to end of uninitialised data so that
+; ***     Elf/OS 0.4.x can tell if we're colliding with the heap.
+; ***     Make stack manipulation interrupt safe on entry and
+; ***     exit (even though soft UART code is unlikely to work
+; ***     if interrupted).
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -76,7 +81,7 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	6		; build number
+Build:	dw	7		; build number
 	db	'bit banged UART on Q/EF2, inverted',0
 ;
 ;
@@ -96,6 +101,14 @@ dirofs:	dw	0		; dir offset
 ; ***************************************************
 start:	
 	push	r6		; save Elf/OS's return address on its stack
+	ldi     1		; assume interrupts are enabled
+	lsie			; skip if they are
+	ldi	0		; mark interrupts disabled
+	plo	re		; save IE flag
+	ldi	023h		; setup for DIS (X=2, P=3)
+	str	r2
+	dis			; disable interrupts
+	dec	r2
 	load	rf,saveStack	; save Elf/OS's stack
 	ghi	r2
 	str	rf
@@ -103,6 +116,13 @@ start:
 	glo	r2
 	str	rf
 	load	r2,localStack	; use our own stack
+	glo	re		; recover IE flag
+	lbz	start2		; jump if interrupts were disabled
+	ldi	023h		; setup for RET (X=2, P=3)
+	str	r2
+	ret			; re-enable interrupts
+	dec	r2
+start2:
 	ghi	re		; turn off console echo
 	ani	11111110b
 	phi	re
@@ -153,11 +173,26 @@ Exit:
 	ghi	re		; restore console echo
 	ori	00000001b
 	phi	re
+	ldi     1		; assume interrupts are enabled
+	lsie			; skip if they are
+	ldi	0		; mark interrupts disabled
+	plo	re		; save IE flag
+	ldi	023h		; setup for DIS (X=2, P=3)
+	str	r2
+	dis			; disable interrupts
+	dec	r2
 	load	rf,saveStack	; restore Elf/OS's stack
 	lda	rf
 	phi	r2
 	ldn	rf
 	plo	r2
+	glo	re		; recover IE flag
+	lbz	Exit2		; jump if interrupts were disabled
+	ldi	023h		; setup for RET (X=2, P=3)
+	str	r2
+	ret			; re-enable interrupts
+	dec	r2
+Exit2:
 	pop	r6		; restore Elf/OS's return address
 	retn			; return to Elf/OS
 ;
@@ -432,7 +467,7 @@ bitLoop:
 	dec	r9
 	phi	r9
 	glo	r9
-	bnz	bitLoop
+	lbnz	bitLoop
 	ghi	r9
 	str	rf
 	inc	rf
@@ -442,7 +477,7 @@ bitLoop:
 	plo	r9
 	dec	ra
 	glo	ra
-	bnz	bitLoop
+	lbnz	bitLoop
 ;
 	pop	ra
 ;
@@ -1190,8 +1225,6 @@ crcTableHigh:
 	db	0efh,0ffh,0cfh,0dfh,0afh,0bfh,08fh,09fh
 	db	06eh,07eh,04eh,05eh,02eh,03eh,00eh,01eh
 ;
-endrom	equ	$
-;
 Dta:		ds	512
 uint32_buf:	ds	UINT32_DIGITS+1	
 		ds	128
@@ -1213,6 +1246,8 @@ blkNum:		ds	1		; current block #
 blkMode:	ds	1		; 0=checksum, 1=CRC
 fileSize:	ds	4		; # bytes remaining in file
 block0:		ds	128		; buffer for tx/rx
-blockBuffer:
+blockBuffer:	ds	512
+;
+endrom	equ	$
 ;
 	end
