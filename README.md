@@ -19,7 +19,7 @@ to be used. The price that had to be paid for that is having to figure
 out which EF line is being used, and what the idling states of that line
 and Q are.
 
-Thanks to [David Madole](https://github.com/dmadle) coming up with some
+Thanks to [David Madole](https://github.com/dmadole) coming up with some
 ingenious code to figure out which EF line is being used, ys can 
 automatically configure itself for either a real UART (all BIOS calls) 
 or a soft UART using any of the EF lines, and any polarity on both
@@ -27,5 +27,5 @@ receive and transmit.
 
 ### Inspiration
 
-* [Elfos-yr](https://github.com/dmadle/Elfos-yr)<br>
+* [Elfos-yr](https://github.com/dmadole/Elfos-yr)<br>
 * [Elfos-Elf-xr](https://github.com/rileym65/Elf-Elfos-xr)<br>
