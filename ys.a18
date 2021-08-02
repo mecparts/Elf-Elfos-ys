@@ -16,6 +16,8 @@
 ; ***     Make stack manipulation interrupt safe on entry and
 ; ***     exit (even though soft UART code is unlikely to work
 ; ***     if interrupted).
+; ***  8: Add UART type detection & auto config. Both hard &
+; ***     soft UARTs supported.
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -45,6 +47,7 @@
 	include	"kernel.inc"
 ;	
 debug	equ	0
+info	equ	0
 ;
 ; ***************************************************
 ; ***** Constants				*****
@@ -81,9 +84,8 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	7		; build number
-	db	'bit banged UART on Q/EF2, inverted',0
-;
+Build:	dw	8		; build number
+	db	'auto UART detect/config',0
 ;
 monthDays:
 	db	31,28,31,30,31,30,31,31,30,31,30,31
@@ -126,6 +128,7 @@ start2:
 	ghi	re		; turn off console echo
 	ani	11111110b
 	phi	re
+	call	UARTsetup	; auto detect/config UART
 ;
 	call	NextFileName	; point to first file name
 	lbnz	NextFile	; and go send it
@@ -142,7 +145,13 @@ NextFile:
 	str	rf
 	call	ZeroBlock0	; send zero filled block 0 to finish up
 	 if	debug=0
-	load	rf,AckedAction
+	load	rf,SoftAckedAction
+	ldi	low nextBlock
+	str	rf
+	load	rf,HardAckedAction
+	ldi	high nextBlock
+	str	rf
+	inc	rf
 	ldi	low nextBlock
 	str	rf
 	 endi
@@ -507,8 +516,14 @@ SaveMode:
 	str	rf
 ;
 	 if	debug=0
-	load	rf,AckedAction
-	ldi	low readne2
+	load	rf,SoftAckedAction
+	ldi	low SoftReadne2
+	str	rf
+	load	rf,HardAckedAction
+	ldi	high HardAcked
+	str	rf
+	inc	rf
+	ldi	low HardAcked
 	str	rf
 	 endi
 	load	rf,blkNum
@@ -588,7 +603,13 @@ ReadBytes:
 ;
 	pop	rc		; retrieve block size
 	 if	debug=0
-	load	rf,AckedAction
+	load	rf,SoftAckedAction
+	ldi	low nextBlock
+	str	rf
+	load	rf,HardAckedAction
+	ldi	high nextBlock
+	str	rf
+	inc	rf
 	ldi	low nextBlock
 	str	rf
 	 endi
@@ -777,11 +798,12 @@ SendWithCRC:
 	ghi	rc		; left to send
 	bnz	SendWithCRC
 	glo	rc
-	bnz	SendWithCRC
+	lbnz	SendWithCRC
 ;
 	ghi	r7		; send hi byte of CRC
 	call	TTYout
-	lbr	DoLastChar
+HardUARTlbr1	equ	$+1
+	lbr	SoftUARTlastChar
 ;
 SendWithChecksum:
 	lda	rf
@@ -796,7 +818,29 @@ SendWithChecksum:
 	lbnz	SendWithChecksum
 	glo	rc
 	lbnz	SendWithChecksum
-	lbr	DoLastChar
+HardUARTlbr2	equ	$+1
+	lbr	SoftUARTlastChar
+;
+; With a physical UART, we've got no worries about missing the ACK
+; after sending the last character of the block, even after block 0
+; when we have to handle 2 characters (the ACK/NAK then the CRC/NAK
+; character).
+;
+HardUARTlastChar:
+	glo	r7
+	call	TTYout		; send checksum or low byte of CRC
+	CALL	GetACK
+HardAckedAction	equ	$+1
+	lbnf	HardAcked	; block ACK'd
+	smi	nak
+	lbnz	SendBlockError
+	dec	r8		; block NAK'd
+	glo	r8		; resend if any retries left
+	lbnz	ResendBlock
+	lbr	SendBlockError
+HardAcked:
+	call	WaitNAKorCRC
+	lbr	nextBlock
 ;
 	page
 ;
@@ -807,7 +851,7 @@ SendWithChecksum:
 ; patching this to match the machine configuration, but it's all in
 ; my head at the moment.
 ;
-DoLastChar:
+SoftUARTlastChar:
 	 if debug
 	glo	r7
 	call	ttyout
@@ -833,10 +877,12 @@ DoLastChar:
 	sep	rd
 	ldi	0
 	shr
-typelp:	bdf	typenb		; jump if no bit
-	req			; set output
+typelp:	bdf	SoftTxHigh	; jump if 1 bit
+SoftTxLow:
+	req			; reset output
 	br	typect
-typenb:	seq			; reset output
+SoftTxHigh:
+	seq			; set output
 	br	typect
 typect:	sep	rd		; perform bit delay
 	sex	r2
@@ -847,7 +893,8 @@ typect:	sep	rd		; perform bit delay
 	dec	rf
 	glo	rf
 	bnz	typelp
-	seq			; set stop bits
+SoftTxStop:
+	req			; set stop bits
 	sep	rd		; wait half the pulse width
 	sep	rd		; wait another half the pulse width
 readne:
@@ -858,14 +905,16 @@ readne:
 	shr
 	shr
 	phi	re
-	bn2	$		; wait for transmission
+SoftRxStart1:
+	bn1	$		; wait for transmission
 	sep	rd		; wait half the pulse width
 	ghi	rf		; recover baud constant
 	phi	re
 recvnelp:
 	ghi	rf
 	shr			; shift right
-	b2	recvnelp0	; jump if zero bi
+SoftRxBit1:
+	b1	recvnelp0	; jump if zero bi
 	ori	128		; set bit
 recvnelp1:
 	phi	rf
@@ -881,8 +930,8 @@ recvnedn:
 	plo	re
 
 	smi	ack
-AckedAction equ	$+1
-	bz	readne2		; block ACK'd
+SoftAckedAction equ	$+1
+	bz	SoftReadne2	; block ACK'd
 	smi	nak-ack
 	bnz	SendBlockError
 	dec	r8		; block NAK'd
@@ -894,7 +943,7 @@ SendBlockError:
 	glo	re
 	smi	0		; DF = 1, error
 	retn
-readne2:
+SoftReadne2:
 	ldi	9		; 8 bits to receive
 	plo	rf
 	ghi	re		; first delay is half bit size
@@ -902,14 +951,16 @@ readne2:
 	shr
 	shr
 	phi	re
-	bn2	$		; wait for transmission
+SoftRxStart2:
+	bn1	$		; wait for transmission
 	sep	rd		; wait half the pulse width
 	ghi	rf		; recover baud constant
 	phi	re
 recvne2lp:
 	ghi	rf
 	shr			; shift right
-	b2	recvne2lp0	; jump if zero bi
+SoftRxBit2:
+	b1	recvne2lp0	; jump if zero bi
 	ori	128		; set bit
 recvne2lp1:
 	phi	rf
@@ -1108,6 +1159,267 @@ add32bits:
 	phi	r7
 	retn
 ;
+; ===================================================
+; === Based on David Madole's UART detect utility ===
+; ===================================================
+;
+insSEQ	equ	7BH
+insREQ	equ	7AH
+insB1	equ	34H
+insBN1	equ	3CH
+;
+UARTsetup:
+	ghi	re
+	ani	0feh
+	lbz	realUART	; baud constant 0000000x: real UART
+;
+	xri	0feh
+	lbz	realUART	; baud constant 1111111x: real UART
+;
+	load	rf,SoftTxHigh	; patch addresses in soft UART Tx
+	load	rd,SoftTxLow
+	load	rc,SoftTxStop
+	ldi	insSEQ
+	bq	QidlesHigh
+QidlesLow:
+	ldi	insREQ
+QidlesHigh:
+	str	rf		; Tx 1 bit
+	str	rc		; Tx stop bit (high)
+	xri	insREQ XOR insSEQ
+	str	rd		; Tx 0 bit
+	 if	INFO
+	pushd
+	call	O_INMSG
+	db	'Soft UART',cr,lf,'Tx on Q (pin idles ',0
+	popd
+	xri	insREQ
+	bnz	qlow
+	call	O_INMSG
+	db	'high)',cr,lf,0
+	br	afterq
+qlow:	call	O_INMSG
+	db	'low)',cr,lf,0
+afterq:
+;
+	call	O_INMSG
+	db	'Rx on /EF',0
+	 endi
+	call	searchrx
+	lbdf	unknownUART
+;
+	plo	re
+	load	rf,SoftRxStart1	; patch addresses in soft UART Rx
+	load	rd,SoftRxStart2
+	load	rc,SoftRxBit1
+	load	rb,SoftRxBit2
+	glo	re
+	str	rf
+	str	rd
+	xri	insB1 XOR insBN1 ; flip from Bx to BNx instruction
+	str	rc		; or vice versa depending on idle
+	str	rb		; state
+	 if	INFO
+	pushd
+	ani	00000011b
+	adi	'1'
+	call	O_TYPE
+	call	O_INMSG
+	db	' (pin idles ',0
+	popd
+	ani	insB1 XOR insBN1
+	bz	efIdlesHigh
+	call	O_INMSG
+	db	'low)',cr,lf,0
+	retn
+efIdlesHigh:
+	call	O_INMSG
+	db	'high)',cr,lf,0
+	 endi
+	retn
+;
+unknownUART:
+	call	O_INMSG
+	db	'Can',27h,'t figure out soft UART configuration',cr,lf,0
+	lbr	Exit
+;
+realUART:
+	load	rf,HardUARTlbr1	; with a real UART, we've got time
+	load	rd,HardUARTlbr2	; to spare between sending the last
+	ldi	high HardUARTlastChar
+	str	rf		; character in the block and reading
+	str	rd		; the ACK/NAK and (for block 0) the
+	inc	rf		; following CRC/NAK
+	inc	rd
+	ldi	low HardUARTlastChar
+	str	rf
+	str	rd
+	call	O_INMSG
+	db	'Real UART',cr,lf,0
+	retn
+ 
+; Because the following code uses branch-on-EF instructions which
+; are only available in short branch form, it is organized in a
+; separate page of memory to ensure the branches do not end up
+; crossing a page boundary unexpectedly.
+
+	page
+
+; The following lookup tables are used for decoding 1802 opcodes
+; so we know how to skip literal data bytes and recognize the
+; EF test instructions and those we will stop searching on. This
+; needs to be at the start of a page due to how its indexed.
+;
+;	0 - One byte instruction
+;	1 - Two byte instruction
+;	2 - Three byte instruction
+;	4 - Jump instruction
+;	8 - SEP other than R4
+; 16 - EF test instruction
+
+opcodes:	db	0,0,0,low opcode3x,0,0,0,low opcode7x			; 0X-7X
+		db	0,0,0,0,low opcodecx,low opcodedx,0,low opcodefx	; 8X-FX
+
+opcode3x:	db	1,1,1,1,16,16,16,16,0,1,1,1,16,16,16,16	; 3X
+opcode7x:	db	0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1		; 7X
+opcodecx:	db	4,2,2,2,0,0,0,0,0,2,2,2,0,0,0,0		; CX
+opcodedx:	db	8,8,8,8,2,8,8,8,8,8,8,8,8,8,8,8		; DX
+opcodefx:	db	0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,1		; FX
+
+;
+; Determine the correct EF line by searching through the readkey
+; subroutine code looking for the first Bx/BNx instruction. This
+; tries to be intelligent by skipping literal bytes and only 
+; looking at opcodes so it is not fooled by data. It also follows
+; LBR opcodes but otherwise does a linear search. Stops at the 
+; first SEP instruction it sees that is not SEP R4.
+;
+; D will be 0 if the EF line can't be determined, otherwise it will
+; be the 1802 opcode that branches on an idle line condition.
+;
+searchrx:
+	load	rf,O_READKEY
+
+	ldi	high opcodes
+	phi	rd
+
+	sex	rd
+
+	br	nextbyte
+
+jumpins:
+	inc	rf
+
+	lda	rf		; make RF follow the LBR
+	plo	re
+	ldn	rf
+	plo	rf
+	glo	re
+	phi	rf
+
+	br	nextbyte
+
+skip3ins:
+	inc	rf
+skip2ins:
+	inc	rf
+skip1ins:
+	inc	rf
+
+nextbyte:
+	ldn	rf
+	shr
+	shr
+	shr
+	shr
+	plo	rd
+
+	ldn	rd
+	bz	skip1ins
+
+	ldn	rf
+	ani	0fh
+	or
+	plo	rd
+
+	ldn	rd			; 0
+	bz	skip1ins
+
+	shr				; 1
+	bdf	skip2ins
+
+	shr				; 2
+	bdf	skip3ins
+
+	shr				; 4
+	bdf	jumpins
+
+	shr				; 8 terminate on SEP other than
+	bdf	notfound		; SEP 4
+
+	ldn	rf			; 16
+	ani	3
+	plo	re
+;
+; Determine whether the EF line is inverted or not. This works by
+; looking at the level when the line is idle. Basically it watches
+; for the line to not change for a period of time and whatever 
+; level it's at is assumed to be the idle state. Note that this
+; code self-patches in the EF test instructions, kind of nasty but
+; sometimes on the 1802 you do what you have to do. This means it
+; can't go in ROM but if you are thinking about putting this in
+; ROM something else is going wrong anyway!
+;
+	ldi	high bef
+	phi	rd
+
+	ldi	low bef
+	plo	rd
+	glo	re
+	ori	34h
+	str	rd
+
+	ldi	low bnef
+	plo	rd
+	glo	re
+	ori	3ch
+	str	rd
+
+negative:
+	ldi	9
+	plo	rf
+	phi	rf
+
+negloop:
+	dec	rf
+	ghi	rf
+bef:
+	b1	positive
+	bnz	negloop
+
+	ldi	low bnef
+	plo	rd
+	ldn	rd
+
+	retn
+
+positive:
+	ldi	9
+	plo	rf
+	phi	rf
+posloop:
+	dec	rf
+	ghi	rf
+bnef:
+	bn1	negative
+	bnz	posloop
+
+	ldi	low bef
+	plo	rd
+	ldn	rd
+notfound:
+	retn
+; ===================================================
 	 if	debug
 ;
 ; ***************************************************
