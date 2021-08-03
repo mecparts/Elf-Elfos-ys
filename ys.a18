@@ -18,6 +18,8 @@
 ; ***     if interrupted).
 ; ***  8: Add UART type detection & auto config. Both hard &
 ; ***     soft UARTs supported.
+; ***  9: Expand directory files on cmd line into their component
+; ***     data files for sending (NOT recursive)
 ; *******************************************************************
 ; *** This software is released to the public domain.		  ***
 ; *** You have permission to use, modify, copy, and distribute	  ***
@@ -84,18 +86,32 @@ LoadAdr	equ	2000h
 ; ***** Program header				*****
 ; ***************************************************
 	date
-Build:	dw	8		; build number
-	db	'auto UART detect/config',0
+Build:	dw	9		; build number
+	db	'expand dirs in cmd tail',0
 ;
 monthDays:
 	db	31,28,31,30,31,30,31,31,30,31,30,31
 ;
-FilDes:	db	0,0,0,0		; current file offset
-	dw	Dta		; DTA
+CmdFilDes:
+	db	0,0,0,0		; current file offset
+	dw	CmdDta		; DTA
 	dw	0		; eof
 	db	0		; flags
-sector:	db	0,0,0,0		; dir sector
-dirofs:	dw	0		; dir offset
+CmdDirSec:
+	db	0,0,0,0		; dir sector
+CmdDirOfs:
+	dw	0		; dir offset
+	db	0,0,0,0		; current sector in DTA
+;
+SndFilDes:
+	db	0,0,0,0		; current file offset
+	dw	SndDta		; DTA
+	dw	0		; eof
+	db	0		; flags
+SndDirSec:
+	db	0,0,0,0		; dir sector
+SndDirOfs:
+	dw	0		; dir offset
 	db	0,0,0,0		; current sector in DTA
 ;
 ; ***************************************************
@@ -136,7 +152,7 @@ start2:
 	db	'Usage:	ys filename [filename...]',cr,lf,0
 	lbr	Exit		; and return to os
 NextFile:
-	call	SendFile	; send next file
+	call	ProcFile	; process next file (either send or expand)
 	call	NextFileName	; point to next file name in cmd tail
 	lbnz	NextFile	; loop for next file
 	call	WaitNAKorCRC
@@ -206,12 +222,152 @@ Exit2:
 	retn			; return to Elf/OS
 ;
 ; ***************************************************
+; ***** Process file: if a directory file,	*****
+; ***** send each ordinary file contained in it	*****
+; ***** If an ordinary file, just send it  	*****
+; ***** RA: points to file name			*****
+; ***************************************************
+ProcFile:
+	load	rd,cmdFilename	; copy filename from cmd tail
+	load	rc,sndFilename
+ProcCopyName:
+	lda	ra		; look for first less <= space
+	str	rd
+	inc	rd
+	str	rc
+	inc	rc
+	smi	' '+1
+	lbdf	ProcCopyName
+	dec	ra
+	dec	rd
+	ldi	0		; zero terminate filename
+	str	rd
+	inc	rd
+	dec	rc
+	str	rc
+	push	rd		; save block ptr
+	load	rd,CmdFilDes	; get file descriptor
+	load	rf,cmdFilename
+	ldi	0		; flags for open, append
+	plo	r7
+	call	O_OPEN		; attempt to open file to determine size
+	lbnf	CmdFileOpened	; jump if file was opened
+	call	Cancel
+	call	O_INMSG
+	db	'Couldn',27h,'t open file: ',0
+	load	rf,cmdFilename
+	call	O_MSG		; display it
+	call	crlf
+	lbr	Exit		; and return to os
+CmdFileOpened:
+	load	rd,CmdFilDes
+;
+	push	rf
+	ldi	0e0h		; lba mode
+	phi	r8
+	load	rf,CmdDirSec+1	; point to dir sector in CmdFilDes
+	lda	rf		; retrieve sector
+	plo	r8
+	lda	rf
+	phi	r7
+	lda	rf
+	plo	r7
+	load	rf,DirBuffer	; where to load sector
+	call	f_ideread	; call bios to read the sector
+;
+	load	rf,CmdDirOfs+1	; need dirent offset
+	ldn	rf
+	adi	6		; point to flags
+	plo	rd
+	dec	rf
+	ldn	rf
+	adci	0		; propagate carry
+	phi	rd		; r7 now points to flags
+	glo	rd		; now point to correct spot in sector buffer
+	adi	low DirBuffer
+	plo	rd
+	ghi	rd
+	adci	high Dirbuffer
+	phi	rd
+;
+	ldn	rd		; get flags
+	pushd
+	
+	ani	ff_dir
+	bnz	isDirFile
+;
+	load	rd,CmdFilDes
+	call	O_CLOSE
+	push	ra		; save cmd tail ptr
+	load	ra,cmdFilename
+	call	SendFile	; ordinary file, just send it
+	pop	ra
+	retn
+isDirFile:
+	load	rc,32		; read next directory entry
+	load	rf,dirEntBuffer
+	load	rd,CmdFilDes
+	call	O_READ
+	glo	rc
+	lbz	eofdir		; no more
+	load	rf,dirEntBuffer
+	lda	rf		; see if it has a non zero sector
+	lbnz	occupied	; (indicates in-use file)
+	lda	rf
+	lbnz	occupied
+	lda	rf
+	lbnz	occupied
+	lda	rf
+	lbz	isDirFile
+occupied:
+	load	rf,dirEntBuffer+6
+	ldn	rf		; make sure it's not a sub directory
+	ani	ff_dir
+	lbnz	isDirFile
+	push	ra		; save cmd tail ptr
+	load	rf,cmdFilename
+	load	ra,sndFilename
+copyDir:
+	lda	rf
+	str	ra
+	inc	ra
+	bnz	copyDir
+	dec	ra		; point back to terminator
+	dec	ra		; point back to last char of dir
+	ldn	ra
+	smi	'/'
+	bz	hasTrailingSlash
+	inc	ra
+	ldi	'/'
+	str	ra
+hasTrailingSlash:
+	inc	ra
+	load	rf,dirEntBuffer+12
+copyFileName:
+	lda	rf
+	str	ra
+	inc	ra
+	bnz	copyFileName
+	load	ra,sndFilename
+	call	SendFile	; send file from directory entry
+	pop	ra		; restore cmd tail ptr
+	lbr	isDirFile
+eofdir:
+	load	rd,CmdFilDes
+	call	O_CLOSE
+	retn
+;
+; ***************************************************
 ; ***** Send file: send a single file	  	*****
 ; ***** RA: points to file name			*****
 ; ***************************************************
 SendFile:
 	call	ZeroBlock0
 	load	rd,block0	; copy filename to block
+	ldn	ra		; don't allow leading /
+	smi	'/'
+	bnz	B0loop1		; jump if not an absolute path
+	inc	ra		; make it a relative path
 B0loop1:
 	lda	ra		; look for first less <= space
 	str	rd
@@ -220,24 +376,23 @@ B0loop1:
 	lbdf	B0loop1
 	dec	ra
 	dec	rd
-	ldi	0		; zero terminate filename
-	str	rd
-	inc	rd
+	inc	rd		; skip over 0 terminator
 	push	rd		; save block ptr
-	load	rd,fildes	; get file descriptor
-	load	rf,block0
+	load	rd,SndFilDes	; get file descriptor
+	load	rf,sndFilename
 	ldi	O_APPND		; flags for open, append
 	plo	r7
 	call	O_OPEN		; attempt to open file to determine size
-	lbnf	B0opened	; jump if file was opened
+	lbnf	SndFileOpened	; jump if file was opened
+	call	Cancel
 	call	O_INMSG
 	db	'Couldn',27h,'t open file: ',0
-	load	rf,block0
+	load	rf,sndFilename
 	call	O_MSG		; display it
 	call	crlf
 	lbr	Exit		; and return to os
-B0opened:
-	load	rd,fildes
+SndFileOpened:
+	load	rd,SndFilDes
 	load	rf,fileSize
 	lda	rd		; put 32 bit offset into
 	phi	r7		; R7:R8 and fileSize
@@ -267,7 +422,7 @@ B0opened:
 ;
 	load	r8,0
 	load	r7,0
-	load	rd,fildes
+	load	rd,SndFilDes
 	load	rc,0		; rewind file to start
 	call	O_SEEK
 ;
@@ -283,17 +438,17 @@ B0opened:
 	push	rf
 	ldi	0e0h		; lba mode
 	phi	r8
-	load	rf,sector+1	; point to dir sector in FILDES
+	load	rf,SndDirSec+1	; point to dir sector in SndFilDes
 	lda	rf		; retrieve sector
 	plo	r8
 	lda	rf
 	phi	r7
 	lda	rf
 	plo	r7
-	load	rf,dirbuf	; where to load sector
+	load	rf,DirBuffer	; where to load sector
 	call	f_ideread	; call bios to read the sector
 ;
-	load	rf,dirofs+1	; need dirent offset
+	load	rf,SndDirOfs+1	; need dirent offset
 	ldn	rf
 	adi	7		; point to date block
 	plo	ra
@@ -302,10 +457,10 @@ B0opened:
 	adci	0		; propagate carry
 	phi	ra		; r7 now points to date block
 	glo	ra		; now point to correct spot in sector buffer
-	adi	low dirbuf
+	adi	low DirBuffer
 	plo	ra
 	ghi	ra
-	adci	high dirbuf
+	adci	high DirBuffer
 	phi	ra
 ;
 	load	rf,year
@@ -392,7 +547,7 @@ yearsDone:
 	phi	rc		; 
 	lda	rf		; month # (1-12)
 	smi	1
-	bz	monthsDone
+	lbz	monthsDone
 	plo	rc		; rc.0 is month # -1
 	load	rd,monthDays
 monthsLoop:
@@ -414,17 +569,17 @@ notFebruary:
 	glo	rc
 	smi	1
 	plo	rc
-	bnz	monthsLoop
+	lbnz	monthsLoop
 monthsDone:
 	lda	rf		; day of month
 	smi	1
-	bz	domDone
+	lbz	domDone
 	plo	r9
 domLoop:
 	call	add32bits
 	dec	r9
 	glo	r9
-	bnz	domLoop
+	lbnz	domLoop
 domDone:
 	load	ra,0
 	load	rb,3600		; seconds in an hour
@@ -493,9 +648,8 @@ bitLoop:
 	ldi	' '		; finish timestamp with space	
 	str	rf
 	inc	rf
-	ldi	'0'		; default file mode to 0
-	str	rf
-	str	rf
+	ldi	'0'		; default file mode to '0'
+	str	rf		; no trailing nul needed: already 0'd
 ;
 	call	WaitNAKorCRC
 	smi	crc
@@ -503,7 +657,7 @@ bitLoop:
 	smi	nak-crc
 	lbz	SaveMode
 SendFileError:
-	load	rd,fildes
+	load	rd,SndFilDes
 	call	O_CLOSE
 	smi	0		; DF=1, error
 	retn
@@ -568,7 +722,7 @@ NearingTheEnd:
 	lbz	FileDone
 MoreToGo:
 	push	rc
-	load	rd,fildes
+	load	rd,SndFilDes
 	load	rf,blockBuffer
 	call	O_READ
 	glo	rc
@@ -630,7 +784,7 @@ FileDone:
 	call	SendEOT		; signal file done and get response
 	smi	ack		; ACK'd?
 	lbnz	SendFileError
-	load	rd,fildes
+	load	rd,SndFilDes
 	call	O_CLOSE
 	adi	0		; DF=0, no error
 	retn			; all done!
@@ -733,7 +887,7 @@ SendEOT:
 	 else
 	call	f_read
 	smi	ack		; wait for ACK (^F)
-	bnz	SendEOT
+	lbnz	SendEOT
 	 endi
 	ldi	ack
 	retn
@@ -796,7 +950,7 @@ SendWithCRC:
 ;
 	dec	rc		; loop while data bytes
 	ghi	rc		; left to send
-	bnz	SendWithCRC
+	lbnz	SendWithCRC
 	glo	rc
 	lbnz	SendWithCRC
 ;
@@ -1537,28 +1691,33 @@ crcTableHigh:
 	db	0efh,0ffh,0cfh,0dfh,0afh,0bfh,08fh,09fh
 	db	06eh,07eh,04eh,05eh,02eh,03eh,00eh,01eh
 ;
-Dta:		ds	512
+CmdDta:		ds	512
+SndDta:		ds	512
 uint32_buf:	ds	UINT32_DIGITS+1	
 		ds	128
 localStack:	ds	1
 saveStack:	ds	2
-
-dirbuf:	ds	512
 ;
-year:	ds	1
-month:	ds	1
-dom:	ds	1
-hours:	ds	1
-minutes: ds	1
-seconds: ds	1
+cmdFilename:	ds	128
+sndFilename:	ds	128
 ;
-epoch:	ds	4
+DirBuffer:	ds	512
+DirEntBuffer:	ds	32
+;
+year:		ds	1
+month:		ds	1
+dom:		ds	1
+hours:		ds	1
+minutes:	ds	1
+seconds:	ds	1
+;
+epoch:		ds	4
 ;
 blkNum:		ds	1		; current block #
 blkMode:	ds	1		; 0=checksum, 1=CRC
 fileSize:	ds	4		; # bytes remaining in file
 block0:		ds	128		; buffer for tx/rx
-blockBuffer:	ds	512
+blockBuffer:	ds	1024		; 1k send data buffer
 ;
 endrom	equ	$
 ;

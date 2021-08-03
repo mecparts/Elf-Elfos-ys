@@ -12,6 +12,17 @@ multiple files on the command line, but not (yet?) wildcards.
 
 ### Status
 
+Build 9 includes the ability to send all the files in a single directory
+by just including the directory name. For instance, if you wanted to
+send all the files in /bin, you'd use the command:
+
+```
+   ys /bin
+```
+
+It's not recursive; if there were subdirectories within bin, the files
+within them wouldn't be sent.
+
 Build 8 includes automatic UART configuration. Using BIOS calls for
 all I/O isn't quite fast enough to catch the ACK and CRC/NAK at the
 end of a block 0 send using the big banged UART, so inlined code needs
